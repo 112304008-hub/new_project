@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>股價之神・籤筒 Demo（完整預測版）</title>
+  <style>
+    :root{
+      --tube-w: 180px;
+      --tube-h: 260px;
+      --tube-color-1:#5b1b10;
+      --tube-color-2:#8e2d1d;
+      --tube-color-3:#b43d2c;
+      --wood-1:#cda55c;
+      --wood-2:#b88a3e;
+      --bg:#f7f3ee;
+      --draw-ms: 1500ms;
+      --tilt-end: -7deg;
+      --x-shift-end: -6px;
+    }
+    html,body{ height:100%; }
+    body{
+      margin:0; font-family: system-ui, -apple-system, "Noto Sans TC", Segoe UI, Roboto, sans-serif;
+      background: radial-gradient(1200px 500px at 50% -200px, #fff 0%, var(--bg) 70%, #eee 100%);
+      display:grid; place-items:center; color:#333;
+    }
+    .stage{ position:relative; width:min(90vw, 520px); height:min(90vh, 680px); display:grid; place-items:center; }
+    .table-shadow{
+      position:absolute; bottom:10%; left:50%; transform:translateX(-50%);
+      width:60%; height:28px; border-radius:50%;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,.18), rgba(0,0,0,0) 70%);
+      filter: blur(2px);
+    }
+  .lottery-tube{ position:relative; display:inline-block; cursor:pointer; outline:none; z-index:10010 !important; transform:translateZ(0); will-change:transform; }
+    .lottery-tube:focus-visible{ box-shadow: 0 0 0 4px rgba(212, 175, 55, .35); border-radius: 16px; }
+    .tube, .label, .mouth, .rim, .sticks, .mini-stick, .drawn-stick { pointer-events:none; }
+    .tube{
+      position:relative; width:var(--tube-w); height:var(--tube-h);
+      background: linear-gradient( 90deg, var(--tube-color-1) 0%, var(--tube-color-2) 20%, var(--tube-color-3) 53%, var(--tube-color-2) 80%, var(--tube-color-1) 100% );
+      border-radius: 26px 26px 30px 30px / 18px 18px 30px 30px;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.06), inset 0 0 40px rgba(0,0,0,.25), 0 18px 24px rgba(0,0,0,.25);
+    }
+    .tube::after{
+      content:""; position:absolute; left:0; right:0; bottom:0; height:36px;
+      border-radius: 0 0 30px 30px / 0 0 24px 24px;
+      background: linear-gradient( to bottom, rgba(255,255,255,.06), rgba(0,0,0,.22) );
+    }
+    .mouth{ position:absolute; left:10px; right:10px; top:-22px; height:44px; border-radius:50%; overflow:hidden; z-index:2;
+      background:
+        radial-gradient(120px 20px at 50% 26px, rgba(0,0,0,.22), rgba(0,0,0,0) 70%),
+        radial-gradient(120px 20px at 50% 18px, rgba(255,255,255,.45), rgba(255,255,255,0) 70%),
+        linear-gradient(90deg, #632016, #9e2f20 55%, #632016);
+      box-shadow: 0 10px 14px rgba(0,0,0,.18);
+    }
+    .sticks{ position:absolute; left:6%; right:6%; bottom:8px; height:34px; }
+    .mini-stick{ position:absolute; bottom:-2px; width:12px; height: var(--h, 26px);
+      background: linear-gradient(90deg, var(--wood-1), var(--wood-2));
+      border: 1px solid rgba(0,0,0,.25); border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,.25);
+    }
+    .rim{ position:absolute; left:10px; right:10px; top:-22px; height:44px; border-radius:50%; z-index:4;
+      background:
+        radial-gradient(120px 18px at 50% 20px, rgba(255,255,255,.65), rgba(255,255,255,0) 60%),
+        radial-gradient(120px 20px at 50% 24px, rgba(0,0,0,.18), rgba(0,0,0,0) 60%),
+        linear-gradient(90deg, #7c2417, #a93020 50%, #7c2417);
+      box-shadow: 0 14px 18px rgba(0,0,0,.18);
+    }
+    .label{
+      position:absolute; top:22%; left:50%; transform:translateX(-50%);
+      width:64px; height:56%; border-radius: 10px;
+      background: linear-gradient(#b78b2a, #f0d786 30%, #b78b2a 70%, #f6e7aa);
+      border: 1px solid rgba(0,0,0,.25);
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,.25), 0 8px 14px rgba(0,0,0,.25);
+      display:flex; align-items:center; justify-content:center; writing-mode: vertical-rl;
+      font-family: "Noto Serif TC", serif; font-weight:800; letter-spacing: .2em; color:#5d2e04; text-shadow: 0 1px 0 rgba(255,255,255,.35);
+      z-index:5;
+    }
+    .label::after{ content:"股價之神"; }
+    .drawn-stick{ position:absolute; left:50%; top:-6px;
+      transform: translateX(calc(-50% + var(--x-shift, 0px))) translateY(0) rotate(var(--tilt, 0deg));
+      width: 30px; height: 190px; border-radius: 8px; z-index:3;
+      background: linear-gradient( 90deg, var(--wood-1), var(--wood-2) );
+      border: 1px solid rgba(0,0,0,.25);
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,.2), 0 10px 18px rgba(0,0,0,.25);
+      display:flex; align-items:center; justify-content:center;
+      font-family: "Noto Serif TC", serif; font-weight:800; letter-spacing:.4em; color:#5b3f17; writing-mode: vertical-rl; user-select:none;
+    }
+    .drawn-stick span{ pointer-events:none; }
+    @keyframes shake{ 0%{ transform: rotate(0); } 25%{ transform: rotate(-2.5deg); } 50%{ transform: rotate(2.5deg); } 100%{ transform: rotate(0); } }
+    .drawn-stick.show{
+      transition: transform var(--draw-ms) cubic-bezier(.18,.9,.18,1);
+      transform: translateX(calc(-50% + var(--x-shift, -6px))) translateY(-210px) rotate(var(--tilt, -7deg));
+    }
+    .shake{ animation: shake .26s ease-in-out 1; }
+    .hint{ margin-top:20px; opacity:.7; font-size:.95rem; }
+    .omikuji{ margin-top:16px; padding:18px 16px; width:min(90vw, 360px);
+      border: 2px solid #b3212d; border-radius: 12px; position:relative;
+      box-shadow: 0 10px 24px rgba(0,0,0,.12);
+      opacity:0; transform: translateY(6px) scale(.98); transition: opacity .25s ease, transform .25s ease;
+      background:
+        radial-gradient(120% 60% at 50% 0%, rgba(255,255,255,.9), rgba(255,255,255,0)),
+        repeating-linear-gradient(0deg, rgba(0,0,0,.02) 0 2px, rgba(0,0,0,.03) 2px 3px),
+        radial-gradient(1px 1px at 20% 30%, rgba(0,0,0,.05), transparent 1px),
+        radial-gradient(1px 1px at 80% 70%, rgba(0,0,0,.05), transparent 1px),
+        linear-gradient(#fffef8, #fdf6e5);
+      background-blend-mode: multiply;
+    }
+    .omikuji::before{ content:""; position:absolute; inset:6px; border-radius:10px;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.06), inset 0 20px 40px rgba(0,0,0,.04);
+      pointer-events:none; }
+    .omikuji .title{ font-weight:800; letter-spacing:.3em; text-align:center; color:#b3212d; margin-bottom:8px; }
+    .omikuji .content{ font-size:1.05rem; text-align:center; font-weight:700; color:#333; }
+    .omikuji .meta{ margin-top:10px; font-size:.9rem; opacity:.75; text-align:center; }
+    .omikuji .warn{ margin-top:8px; padding:8px; border-radius:8px; background:#fff9e6; color:#8a6d00; border:1px solid #ffe58f; font-size:.9rem; }
+    .omikuji.show {
+  opacity: 1;                      /* 有 .show 就會顯示 */
+  transform: translateY(0) scale(1);     /* 回歸正常位置 */
+}
+
+    .hit-area{
+      position:absolute; inset:-20px; background: transparent; border: 0; padding:0;
+      cursor:pointer; z-index: 50; border-radius: 20px;
+    }
+    .hit-area[disabled]{ cursor:not-allowed; }
+    .hit-area:focus-visible{ outline: 4px solid rgba(212, 175, 55, .35); }
+    #debug{ margin-top:10px; font-size:.9rem; opacity:.6; }
+    #test{ margin-top:10px; padding:6px 10px; border-radius:8px; border:1px solid rgba(0,0,0,.15); background:#fff; cursor:pointer; }
+    /* small spinner used in right-side panel */
+    .spinner{ display:inline-block; width:18px; height:18px; border:3px solid rgba(0,0,0,.08); border-top-color:rgba(59,123,191,0.95); border-radius:50%; animation:spin .9s linear infinite; vertical-align:middle; }
+    @keyframes spin{ to{ transform:rotate(360deg); } }
+    /* parchment scroll styling */
+    .parchment{
+      background-color: #fbf4e0;
+      background-image:
+        linear-gradient(0deg, rgba(255,255,255,0.6) 0%, rgba(255,255,255,0) 40%),
+        radial-gradient(circle at 10% 10%, rgba(0,0,0,0.03), transparent 12%),
+        repeating-linear-gradient(0deg, rgba(0,0,0,0.02) 0 1px, transparent 1px 8px);
+      background-blend-mode: multiply;
+      border: 1px solid rgba(0,0,0,0.08);
+      box-shadow: 0 14px 30px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.6);
+      border-radius: 8px;
+      color: #2b1f13;
+      font-family: "Noto Serif TC", serif;
+      line-height:1.45; font-size:13px;
+      max-height: calc(100vh - 160px);
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+      padding:18px;
+    }
+    .parchment::-webkit-scrollbar{ width:10px; }
+    .parchment::-webkit-scrollbar-thumb{ background: linear-gradient(#d6c29a,#cbb785); border-radius:8px; border:2px solid rgba(0,0,0,0.03); }
+    .parchment .section-title{ font-weight:700; color:#7c2417; margin-bottom:8px; }
+
+    /* aged parchment tweaks and scroll rods */
+    .scroll-with-rods{ position:fixed; box-shadow: 0 18px 36px rgba(0,0,0,0.22); border-radius:12px; overflow:visible; }
+    .scroll-with-rods .rod{ position:absolute; left:50%; transform:translateX(-50%); width:92%; height:18px; border-radius:10px; box-shadow: 0 6px 12px rgba(0,0,0,0.18); }
+    .scroll-with-rods .rod-top{ top:8px; }
+    .scroll-with-rods .rod-bottom{ bottom:8px; }
+    .scroll-with-rods .rod::before{ content:''; position:absolute; left:0; right:0; top:0; bottom:0; border-radius:10px; background: linear-gradient(90deg, #ffd86b, #d6ac3c 45%, #ffd86b); box-shadow: inset 0 1px 0 rgba(255,255,255,0.5); }
+    /* small finials at ends */
+    .scroll-with-rods .rod::after{ content:''; position:absolute; width:18px; height:18px; border-radius:50%; background: radial-gradient(circle at 40% 30%, #fff7d6, #c38b2a); top:50%; transform:translateY(-50%); left:-12px; box-shadow: 0 3px 6px rgba(0,0,0,0.18); }
+    .scroll-with-rods .rod-bottom::after{ left:auto; right:-12px; }
+
+    /* age the parchment: darker edges, vignette, stains and paper grain */
+    .parchment{ background-color:#f5e8d4; background-image:
+        linear-gradient(0deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0) 40%),
+        radial-gradient(circle at 10% 10%, rgba(0,0,0,0.03), transparent 12%),
+        repeating-linear-gradient(0deg, rgba(0,0,0,0.02) 0 1px, transparent 1px 8px),
+        linear-gradient(180deg, rgba(0,0,0,0.03), rgba(0,0,0,0) 70%);
+      background-blend-mode: multiply; border: 1px solid rgba(0,0,0,0.08); box-shadow: 0 18px 30px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.6);
+      border-radius:10px; color:#2b1f13; font-family: "Noto Serif TC", serif; line-height:1.45; font-size:13px; max-height: calc(100vh - 160px); overflow:auto; padding:28px 18px; position:relative;
+    }
+    .parchment::before{ content:''; position:absolute; inset:0; border-radius:10px; pointer-events:none; box-shadow: inset 0 0 40px rgba(0,0,0,0.06); }
+    .parchment::after{ content:''; position:absolute; left:0; right:0; top:0; bottom:0; pointer-events:none; background-image: radial-gradient( circle at 20% 10%, rgba(0,0,0,0.04), transparent 8%), radial-gradient(circle at 80% 85%, rgba(0,0,0,0.03), transparent 8%); opacity:0.75; mix-blend-mode:multiply; }
+    /* small stains */
+    .parchment .stain{ position:absolute; width:36px; height:18px; background: radial-gradient(ellipse at 30% 40%, rgba(86,65,22,0.18), rgba(86,65,22,0.02)); border-radius:50%; transform:rotate(-12deg); left:18px; top:60%; opacity:0.9; pointer-events:none; }
+    .parchment .stain.s2{ left:auto; right:28px; top:40%; transform:rotate(8deg); opacity:0.7; }
+
+    /* realistic roll tails and fiber texture */
+    .scroll-with-rods::before, .scroll-with-rods::after{
+      content:''; position:absolute; left:50%; transform:translateX(-50%); width:56px; height:28px; border-radius:50%; background: linear-gradient(180deg, rgba(255,255,255,0.6), rgba(0,0,0,0.06)); box-shadow: inset 0 2px 6px rgba(0,0,0,0.12);
+    }
+    .scroll-with-rods::before{ top:-14px; }
+    .scroll-with-rods::after{ bottom:-14px; }
+
+    /* add subtle fiber texture via inline SVG data URL */
+    .parchment{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'><filter id='g'><feTurbulence baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncA type='table' tableValues='0 0.06'/></feComponentTransfer></filter><rect width='200' height='200' fill='%23f5e8d4' /><g opacity='0.06' filter='url(%23g)'><rect width='200' height='200' fill='%23000000'/></g></svg>"); background-repeat:repeat; background-size:160px 160px, auto; }
+
+    /* frayed edges: use box-shadow to fake tiny torn edges */
+    .parchment{ box-shadow: 0 18px 30px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.6), inset 0 0 18px rgba(0,0,0,0.06); }
+    .parchment .fray{ position:absolute; left:8px; right:8px; height:6px; top:6px; background: linear-gradient(90deg, rgba(0,0,0,0.04), rgba(0,0,0,0)); opacity:0.6; border-radius:2px; }
+    .parchment .fray.bot{ top:auto; bottom:6px; transform:rotate(180deg); }
+    /* page background image (toggled) */
+    .page-bg {
+      position:fixed; inset:0; z-index: 0; background-size: cover; background-position: center center; background-repeat: no-repeat;
+      opacity:0.50; filter: saturate(1.12) contrast(1.08) brightness(1.02); pointer-events:none;
+      transition: opacity .25s ease, filter .25s ease; mix-blend-mode: multiply;
+    }
+    /* ensure main interactive content sits above the background */
+    .stage, .parchment, .lottery-tube, .scroll-with-rods { z-index: 30; position: relative; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+</head>
+<body>
+  <div id="pageBg" style="
+  background-image: url('/static/ComfyUI_00012_.png');
+  display: block;
+  position: fixed;
+  top: 0;
+  left: -30;
+  width: 100vw;
+  height: 100vh;
+  background-position: 66% center;
+  background-size: 110% auto;
+  background-repeat: no-repeat;
+  z-index: -1;
+"></div>
+
+
+  <!-- temple removed: only tube & scrolls remain -->
+  <div class="stage">
+    <div class="table-shadow" aria-hidden="true"></div>
+
+    <div class="lottery-tube" role="button" aria-label="籤筒，按一下抽籤" tabindex="0">
+      <div class="tube">
+        <div class="mouth" aria-hidden="true">
+          <div class="sticks" id="sticks"></div>
+        </div>
+        <div class="rim" aria-hidden="true"></div>
+        <div class="label" aria-hidden="true"></div>
+      </div>
+      <div class="drawn-stick" id="drawnStick" aria-hidden="true"><span id="bigChar">吉</span></div>
+      <button class="hit-area" id="hit" aria-label="抽籤" onclick="drawStick()"></button>
+    </div>
+
+    <div class="hint">點一下（或按 Enter/空白鍵 / 觸控）試試看。</div>
+
+    <div class="omikuji" id="omikuji" role="status" aria-live="polite" hidden>
+      <div class="title" id="q-title">預測結果</div>
+      <div class="content" id="q-text"><p>正在預測中...</p></div>
+      <div class="meta" id="q-meta"></div>
+      <div class="warn" id="q-warn" style="display:none;"></div>
+    </div>
+
+  <!-- background toggle -->
+  <button id="bgToggle" style="position:fixed; right:14px; top:18px; z-index:20000; padding:8px 10px; border-radius:8px; background:#fffef8; border:1px solid rgba(0,0,0,.08);">背景：關</button>
+  <div id="bgStatus" style="position:fixed; right:14px; top:58px; z-index:20000; padding:6px 8px; border-radius:8px; background:#fffef8; border:1px solid rgba(0,0,0,.06); font-size:12px;">背景狀態：未知</div>
+
+    <button id="test" type="button">（測試）按我也會抽</button>
+    <div id="debug"></div>
+  </div>
+
+  <!-- Left parchment scroll: latest data (fundamentals + lag features) -->
+  <div id="leftScroll" class="parchment scroll-with-rods" style="position:fixed; left:10px; top:80px; width:320px; padding:36px 18px; z-index:12; font-size:13px; display:block;">
+    <div class="rod rod-top" aria-hidden="true"></div>
+    <div style="font-weight:800; color:#7c2417; margin-bottom:8px;">最新資料（基本面 + 滯後特徵）</div>
+    <div id="leftFeatures" style="line-height:1.4; color:#222; max-height:calc(100vh - 220px); overflow:auto;"></div>
+    <div class="rod rod-bottom" aria-hidden="true"></div>
+    <div class="stain"></div>
+  <div class="fray"></div>
+  <div class="fray bot"></div>
+  </div>
+
+  <!-- Right parchment scroll: statistical inference and derivation -->
+  <div id="rightScroll" class="parchment scroll-with-rods" style="position:fixed; right:10px; top:80px; width:320px; padding:36px 18px; z-index:12; font-size:13px; display:block;">
+    <div class="rod rod-top" aria-hidden="true"></div>
+    <div style="font-weight:800; color:#7c2417; margin-bottom:8px;">統計推論（假設檢定 / 推導）</div>
+    <div id="hypothesisMath" style="line-height:1.5; color:#222;"></div>
+    <div style="margin-top:10px; font-weight:700;">推論結果總覽</div>
+    <div id="inferenceResult" style="margin-top:6px; font-size:13px; color:#111;"></div>
+    <div style="margin-top:10px; font-weight:700;">每欄位檢定詳述（包含推導過程與結論）</div>
+    <div style="margin-top:6px; display:flex; gap:8px; align-items:center;">
+      <button id="loadLagBtn" style="padding:6px 8px; font-size:13px;">載入滯後統計</button>
+      <span id="lagStatus" style="font-size:12px; color:#666;">(尚未載入)</span>
+    </div>
+    <div id="topK" style="margin-top:8px; padding:8px; background:#fffef8; border:1px solid rgba(0,0,0,.05); display:none;">
+      <strong>Top 5（依 |pearson_r|）</strong>
+      <div id="topKList" style="margin-top:6px; font-size:13px;"></div>
+    </div>
+    <div style="margin-top:6px; display:flex; gap:8px; align-items:center;"><button id="expandAll" style="padding:6px 8px; font-size:12px;">全部展開</button><button id="collapseAll" style="padding:6px 8px; font-size:12px;">全部收合</button></div>
+    <div id="derivedFeatures" style="margin-top:6px; font-size:13px; color:#111; max-height:calc(100vh - 360px); overflow:auto;"></div>
+    <div class="rod rod-bottom" aria-hidden="true"></div>
+    <div class="stain s2"></div>
+  <div class="fray"></div>
+  <div class="fray bot"></div>
+  </div>
+
+  <!-- Control panel removed. Left/Right scrolls replace the white panel visually. -->
+
+  <script>
+    // 建籤筒視覺
+    (function buildMiniSticks(){
+      const sticksContainer = document.getElementById('sticks');
+      if(!sticksContainer) return;
+      const COUNT = 56;
+      sticksContainer.innerHTML = '';
+      for(let i=0;i<COUNT;i++){
+        const s = document.createElement('span');
+        s.className = 'mini-stick';
+        const base = 6 + (i * (88/(COUNT-1)));
+        const jitter = (Math.random()*2 - 1.0);
+        s.style.left = (base + jitter) + '%';
+        s.style.setProperty('--h', (20 + Math.random()*22) + 'px');
+        s.style.transform = `translateX(-50%) rotate(${(Math.random()*2.2-1.1).toFixed(2)}deg)`;
+        sticksContainer.appendChild(s);
+      }
+      })();
+
+      function msFromVar(name, fallbackMs){
+        const cs = getComputedStyle(document.documentElement);
+        let v = cs.getPropertyValue(name).trim();
+        if(v.endsWith('ms')) return parseFloat(v);
+        if(v.endsWith('s'))  return parseFloat(v)*1000;
+        return fallbackMs;
+      }
+
+    // Draw action: call backend /api/draw and update UI
+    async function drawStick(){
+      const container   = document.querySelector('.lottery-tube');
+      const drawnStick  = document.getElementById('drawnStick');
+      const bigChar     = document.getElementById('bigChar');
+      const omikuji     = document.getElementById('omikuji');
+      const titleEl     = document.getElementById('q-title');
+      const textEl      = document.getElementById('q-text');
+      const metaEl      = document.getElementById('q-meta');
+      const warnEl      = document.getElementById('q-warn');
+      const debug       = document.getElementById('debug');
+      const hit         = document.getElementById('hit');
+
+      if(debug) debug.innerHTML = '<span class="spinner" aria-hidden="true"></span> 開始預測…';
+      if(hit) hit.setAttribute('disabled','disabled');
+
+      // animation
+      if(container){ container.classList.remove('shake'); void container.offsetWidth; container.classList.add('shake'); }
+      if(drawnStick){ drawnStick.classList.remove('show'); void drawnStick.offsetWidth; drawnStick.classList.add('show'); }
+      if(omikuji){ omikuji.hidden = false; omikuji.classList.add('show'); titleEl.textContent = '預測結果'; textEl.innerHTML = '<p>正在預測中…</p>'; metaEl.textContent = ''; warnEl.style.display = 'none'; warnEl.textContent = ''; }
+
+      await new Promise(r => setTimeout(r, msFromVar('--draw-ms', 1500)));
+
+      let res, data;
+      try{
+        res = await fetch('/api/draw?model=rf');
+        data = await res.json();
+      }catch(e){
+        if(debug) debug.textContent = '網路錯誤，無法連線到後端';
+        if(hit) hit.removeAttribute('disabled');
+        return;
+      }
+
+      if(!res.ok || !data){
+        textEl.innerHTML = `<p>系統錯誤，請稍後再試。</p>`;
+        if(debug) debug.textContent = '預測失敗。';
+        if(hit) hit.removeAttribute('disabled');
+        return;
+      }
+
+      const f = data.fortune || {};
+      const label = (data.label || f.label || '').trim();
+      if(label === '漲'){ bigChar.textContent = '吉'; } else if(label === '跌'){ bigChar.textContent = '凶'; } else { bigChar.textContent = '？'; }
+
+      titleEl.textContent = f.title || '預測結果';
+      const lines = Array.isArray(f.text) ? f.text : (f.text? [f.text] : []);
+      textEl.innerHTML = `<p>${lines.join('<br>')}</p>` + (f.advice ? `<p style="margin-top:8px; color:#b3212d;">建議：${f.advice}</p>` : '');
+
+      const prob = (typeof data.proba === 'number') ? (data.proba*100).toFixed(2)+'%' : '—';
+      const thr  = (typeof data.threshold === 'number') ? data.threshold.toFixed(3) : '—';
+      const conf = (typeof f.confidence === 'number') ? f.confidence.toFixed(3) : '—';
+      metaEl.textContent = `機率↑: ${prob}｜門檻: ${thr}｜信心: ${conf}`;
+
+      // populate right scroll
+      try{
+        const fund = document.getElementById('fundamentals');
+        const derived = document.getElementById('derivedFeatures');
+        if(fund) fund.innerHTML = `<div>模型: <strong>${data.model}</strong></div><div>預測概率: <strong>${prob}</strong></div><div>門檻: <strong>${thr}</strong></div>`;
+        if(derived){
+          const df = data.derived || { 'MA_diff(3)': '0.012', 'lag1': '-0.004', 'lag3': '0.021' };
+          derived.innerHTML = Object.keys(df).map(k=>`<div><strong>${k}</strong>: ${df[k]}</div>`).join('');
+        }
+      }catch(e){ console.warn('populate right scroll failed', e); }
+
+      // refresh left scroll latest data after prediction
+      try{ if(typeof loadLatestFeatures === 'function') loadLatestFeatures(); }catch(e){ console.warn('refresh left features failed', e); }
+
+      if(data.warning){ warnEl.style.display = 'block'; warnEl.textContent = data.warning; }
+      if(debug) debug.textContent = '完成。';
+      if(hit) hit.removeAttribute('disabled');
+      // refresh left latest-data after draw
+      try{ if(typeof loadLatestFeatures === 'function') loadLatestFeatures(); }catch(e){ console.warn('refresh latest after draw failed', e); }
+    }
+
+    // 綁定/輔助
+    (function bind(){
+      const hit = document.getElementById('hit');
+      if(hit){
+        hit.addEventListener('click', drawStick);
+        hit.addEventListener('touchstart', (e)=>{ e.preventDefault(); drawStick(); }, {passive:false});
+        hit.addEventListener('keydown', (e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); drawStick(); } });
+      }
+      document.getElementById('test')?.addEventListener('click', drawStick);
+    })();
+
+    // Tab behavior
+    document.getElementById('tabPredict')?.addEventListener('click', ()=>{ document.getElementById('panelPredict').style.display='block'; document.getElementById('panelAnalysis').style.display='none'; });
+    document.getElementById('tabAnalysis')?.addEventListener('click', ()=>{ document.getElementById('panelPredict').style.display='none'; document.getElementById('panelAnalysis').style.display='block'; loadAnalysis(); });
+
+    document.getElementById('refreshDraw')?.addEventListener('click', drawStick);
+
+    async function loadAnalysis(){
+      const status = document.getElementById('diagStatus');
+      const content = document.getElementById('diagContent');
+      status.textContent = '載入中...';
+      showPanelSpinner();
+      setAnalysisControls(false);
+      try{
+        const res = await fetch('/api/diagnostics');
+        if(!res.ok){ status.textContent='載入失敗'; return; }
+        const data = await res.json();
+        content.style.display='block'; status.textContent='已載入';
+        document.getElementById('diagModels').textContent = (data.models||[]).join(', ');
+        document.getElementById('diagThrs').textContent = JSON.stringify(data.thresholds||{});
+        const latestEl = document.getElementById('latestFields'); latestEl.innerHTML='';
+        const latest = data.latest_row || {};
+        Object.keys(latest).slice(0,12).forEach(k=>{ const line = document.createElement('div'); line.textContent = `${k}: ${latest[k]}`; latestEl.appendChild(line); });
+
+        // populate field select
+        const fieldSelect = document.getElementById('fieldSelect'); fieldSelect.innerHTML='';
+        Object.keys(data.feature_stats||{}).forEach(k=>{ const o=document.createElement('option'); o.value=k; o.textContent=k; fieldSelect.appendChild(o); });
+        // populate left scroll math: insert hypothesis and formula using KaTeX
+        try{
+          const left = document.getElementById('leftScroll');
+          const math = document.getElementById('hypothesisMath');
+          const inference = document.getElementById('inferenceResult');
+          if(math){
+            const H0 = `H_0: \mu = 0`;
+            const H1 = `H_1: \mu \ne 0`;
+            const formula = `\\text{t-stat} = \dfrac{\overline{x}-0}{s/\sqrt{n}}`;
+            math.innerHTML = `<div>檢定形式：${H0} \; vs \; ${H1}</div><div style='margin-top:6px;'>公式：<span id='katexEq'></span></div>`;
+            if(window.katex){ katex.render(formula, document.getElementById('katexEq'), {throwOnError:false, displayMode:false}); }
+          }
+          if(inference){ inference.innerHTML = '<div>尚未執行檢定，請在分析頁選擇欄位。</div>'; }
+          if(left) left.style.display = 'block';
+        }catch(e){ console.warn('populate left scroll failed', e); }
+      }catch(e){ status.textContent='載入錯誤'; console.error(e); }
+      finally{ hidePanelSpinner(); setAnalysisControls(true); }
+    }
+
+    // plotting
+    let histChart=null, seriesChart=null;
+    document.getElementById('plotHist')?.addEventListener('click', async ()=>{
+      const fld = document.getElementById('fieldSelect').value; const bins = parseInt(document.getElementById('binsInput').value)||20;
+      if(!fld) return alert('請先選擇欄位');
+      try{
+        setAnalysisControls(false);
+        const res = await fetch(`/api/diagnostics?n_bins=${bins}`); const d = await res.json(); const h = d.histograms[fld];
+        if(!h) return alert('此欄位無 histogram');
+        const canvas = document.getElementById('histChart'); if(!canvas) return; const ctx = canvas.getContext && canvas.getContext('2d');
+        if(!ctx) return alert('無法取得畫布上下文');
+        if(histChart) try{ histChart.destroy(); }catch(e){}
+        if(typeof Chart !== 'undefined'){
+          try{ histChart = new Chart(ctx,{type:'bar', data:{labels:h.bins.slice(0,-1).map(x=>Number(x).toFixed(2)), datasets:[{label:fld, data:h.counts, backgroundColor:'rgba(59,123,191,0.85)'}]}}); }
+          catch(e){ console.warn('chart draw failed', e); alert('繪圖失敗'); }
+        }
+      }finally{ setAnalysisControls(true); }
+      document.getElementById('seriesChart').style.display='none';
+    });
+
+    document.getElementById('plotSeries')?.addEventListener('click', async ()=>{
+      const fld = document.getElementById('fieldSelect').value; if(!fld) return alert('請先選擇欄位');
+      try{
+        setAnalysisControls(false);
+        const res = await fetch(`/api/series?feature=${encodeURIComponent(fld)}&n=500`); const d = await res.json();
+        const vals = d.values || [];
+        const canvas = document.getElementById('seriesChart'); if(!canvas) return; const ctx = canvas.getContext && canvas.getContext('2d');
+        if(!ctx) return alert('無法取得畫布上下文');
+        if(seriesChart) try{ seriesChart.destroy(); }catch(e){}
+        if(typeof Chart !== 'undefined'){
+          try{ seriesChart = new Chart(ctx,{type:'line', data:{labels:vals.map((_,i)=>i), datasets:[{label:fld, data:vals, borderColor:'rgba(59,123,191,0.95)', fill:false}]}, options:{scales:{x:{display:false}}}}); }
+          catch(e){ console.warn('series chart failed', e); alert('繪圖失敗'); }
+        }
+      }finally{ setAnalysisControls(true); }
+      document.getElementById('seriesChart').style.display='block';
+    });
+
+    document.getElementById('downloadReport')?.addEventListener('click', async ()=>{
+      const fld = document.getElementById('fieldSelect').value; if(!fld) return alert('請先選擇欄位');
+      const resp1 = await fetch(`/api/stattests?feature=${encodeURIComponent(fld)}`); const st = await resp1.json();
+      const resp2 = await fetch(`/api/series?feature=${encodeURIComponent(fld)}&n=500`); const ser = await resp2.json();
+      const report = {feature: fld, stattests: st, series: ser};
+      const blob = new Blob([JSON.stringify(report, null, 2)], {type:'application/json'});
+      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download=`report_${fld}.json`; a.click(); URL.revokeObjectURL(url);
+    });
+
+    // when stat-tests view: show results
+    document.getElementById('fieldSelect')?.addEventListener('change', async ()=>{
+      const fld = document.getElementById('fieldSelect').value; if(!fld) return;
+      try{
+        showPanelSpinner(); setAnalysisControls(false);
+        const res = await fetch(`/api/stattests?feature=${encodeURIComponent(fld)}`); const r = await res.json();
+        const sr = document.getElementById('statResults'); sr.innerHTML = `Shapiro W: ${r.shapiro.stat?.toFixed(4)||'N/A'} p=${r.shapiro.p?.toFixed(4)||'N/A'}<br/>t-test t=${r.ttest.stat?.toFixed(4)||'N/A'} p=${r.ttest.p?.toFixed(4)||'N/A'}<br/>ADF stat=${r.adf.stat?.toFixed(4)||'N/A'} p=${r.adf.p?.toFixed(4)||'N/A'}`;
+
+        // render inference into left scroll: show math with KaTeX and verbal conclusion
+        try{
+          const inference = document.getElementById('inferenceResult');
+          const left = document.getElementById('leftScroll');
+          if(inference){
+            const t = r.ttest.stat; const p = r.ttest.p;
+            const concl = (p !== null && p < 0.05) ? '拒絕 H_0（顯著）' : '未拒絕 H_0（不顯著）';
+            inference.innerHTML = `<div>t = ${t?.toFixed(4) || 'N/A'}, p = ${p?.toFixed(4) || 'N/A'}</div><div style="margin-top:6px;">結論：<strong>${concl}</strong></div>`;
+            // show formula rendered
+            const katexel = document.getElementById('katexEq'); if(katexel && window.katex){
+              const formula = `t=\\dfrac{\\bar{x}-0}{s/\\sqrt{n}}`;
+              katex.render(formula, katexel, {throwOnError:false});
+            }
+            if(left) left.style.display = 'block';
+          }
+        }catch(e){ console.warn('render inference failed', e); }
+      }finally{ hidePanelSpinner(); setAnalysisControls(true); }
+    });
+
+    // Diagnostics fetch & render
+    async function loadDiagnostics(){
+      const status = document.getElementById('diagStatus');
+      const content = document.getElementById('diagContent');
+      const modelsEl = document.getElementById('diagModels');
+      const thrsEl = document.getElementById('diagThrs');
+      const latestEl = document.getElementById('latestFields');
+      const featStatsEl = document.getElementById('featStats');
+      const histCtx = document.getElementById('histChart').getContext('2d');
+
+      status.textContent = '載入中...';
+      try{
+        const res = await fetch('/api/diagnostics');
+        if(!res.ok){ status.textContent = '載入失敗'; return; }
+        const data = await res.json();
+        content.style.display = 'block';
+        status.textContent = '已載入';
+        modelsEl.textContent = (data.models || []).join(', ') || '-';
+        thrsEl.textContent = JSON.stringify(data.thresholds || {});
+
+        latestEl.innerHTML = '';
+        const latest = data.latest_row || {};
+        Object.keys(latest).slice(0,12).forEach(k=>{
+          const v = latest[k];
+          const line = document.createElement('div');
+          line.textContent = `${k}: ${String(v)}`;
+          latestEl.appendChild(line);
+        });
+
+        featStatsEl.innerHTML = '';
+        const stats = data.feature_stats || {};
+        Object.keys(stats).slice(0,12).forEach(k=>{
+          const s = stats[k];
+          const line = document.createElement('div');
+          line.textContent = `${k} — mean:${s.mean.toFixed(3)} std:${s.std.toFixed(3)} min:${s.min.toFixed(3)} max:${s.max.toFixed(3)}`;
+          featStatsEl.appendChild(line);
+        });
+
+        // draw first histogram
+        const hist = data.histograms || {};
+        const firstKey = Object.keys(hist)[0];
+        if(firstKey){
+          const h = hist[firstKey];
+          if(window._diagChart) window._diagChart.destroy();
+          window._diagChart = new Chart(histCtx, { type:'bar', data:{ labels: h.bins.slice(0,-1).map(b=>b.toFixed(2)), datasets:[{label:firstKey, data:h.counts, backgroundColor:'rgba(59,123,191,0.85)'}]}, options:{responsive:true, plugins:{legend:{display:false}}}});
+        }
+      }catch(e){
+        status.textContent = '載入錯誤';
+        console.error(e);
+      }
+    }
+    document.getElementById('refreshDiag')?.addEventListener('click', loadDiagnostics);
+    // load lag stats and render in derived features area
+    async function loadLagStats(){
+      try{
+        const res = await fetch('/api/lag_stats');
+        if(!res.ok) return;
+        const d = await res.json();
+        if(!d.ok) return;
+        const derivedEl = document.getElementById('derivedFeatures');
+        if(!derivedEl) return;
+        const items = Array.isArray(d.results) ? d.results : [];
+        derivedEl.innerHTML = '';
+
+        // create container list
+        const list = document.createElement('div');
+        list.style.display = 'flex';
+        list.style.flexDirection = 'column';
+        list.style.gap = '8px';
+
+        items.forEach((it, idx)=>{
+          const card = document.createElement('div'); card.style.border = '1px solid rgba(0,0,0,0.04)'; card.style.borderRadius='8px'; card.style.padding='8px'; card.style.background = '#fff';
+          const head = document.createElement('div'); head.style.display='flex'; head.style.justifyContent='space-between'; head.style.alignItems='center';
+          const title = document.createElement('div'); title.innerHTML = `<strong style="font-size:13px;">${it.feature}</strong><div style="font-size:12px;color:#666;">n=${it.n} ｜ pearson=${it.pearson_r!==null? it.pearson_r.toFixed(4): 'N/A'}</div>`;
+          const controls = document.createElement('div');
+          const btn = document.createElement('button'); btn.textContent='詳細'; btn.style.marginLeft='8px'; btn.style.fontSize='12px';
+          controls.appendChild(btn);
+          head.appendChild(title); head.appendChild(controls);
+
+          const details = document.createElement('div'); details.style.display='none'; details.style.marginTop='8px'; details.style.padding='8px'; details.style.background='#fffef8'; details.style.border='1px solid rgba(0,0,0,.03)'; details.style.borderRadius='6px';
+
+          // process steps
+          if(Array.isArray(it.process) && it.process.length>0){
+            const ul = document.createElement('ul'); ul.style.margin='0'; ul.style.paddingLeft='18px'; ul.style.fontSize='13px'; ul.style.color='#222';
+            it.process.forEach(p=>{ const li = document.createElement('li'); li.textContent = p; ul.appendChild(li); });
+            details.appendChild(ul);
+          }
+
+          // stats row
+          const st = document.createElement('div'); st.style.marginTop='8px'; st.style.fontSize='13px'; st.innerHTML = `mean: ${it.mean!==null? it.mean.toFixed(6): 'N/A'} &nbsp; std: ${it.std!==null? it.std.toFixed(6): 'N/A'} &nbsp; ttest p: ${it.ttest_p!==null? it.ttest_p.toFixed(4): 'N/A'}`;
+          details.appendChild(st);
+
+          // verdict badge
+          if(it.conclusions && it.conclusions.verdict){
+            const verdictText = it.conclusions.verdict || '';
+            const badge = document.createElement('span'); badge.style.display='inline-block'; badge.style.padding='4px 8px'; badge.style.borderRadius='999px'; badge.style.fontWeight='700'; badge.style.fontSize='12px';
+            if(/拒絕|平穩/.test(verdictText)){
+              badge.style.background='#e6ffed'; badge.style.color='#0b6623'; badge.textContent = '良好';
+            } else if(/未拒絕|非平穩/.test(verdictText)){
+              badge.style.background='#fff2f0'; badge.style.color='#8a1f11'; badge.textContent = '警示';
+            } else {
+              badge.style.background='#fff7e6'; badge.style.color='#7a5200'; badge.textContent = '中性';
+            }
+            const vline = document.createElement('div'); vline.style.marginTop='8px'; vline.appendChild(badge); vline.appendChild(document.createTextNode(' ')); vline.appendChild(document.createTextNode(verdictText)); details.appendChild(vline);
+          }
+
+          btn.addEventListener('click', ()=>{ details.style.display = details.style.display==='none' ? 'block' : 'none'; });
+
+          card.appendChild(head); card.appendChild(details); list.appendChild(card);
+        });
+
+        derivedEl.appendChild(list);
+
+        // populate topK
+        try{
+          const sorted = items.slice().sort((a,b)=> Math.abs(b.pearson_r||0) - Math.abs(a.pearson_r||0));
+          const top = sorted.slice(0,5);
+          const topEl = document.getElementById('topK'); const topList = document.getElementById('topKList');
+          if(top.length>0){ topEl.style.display='block'; topList.innerHTML = top.map(t=>`<div><strong>${t.feature}</strong> — |r|=${Math.abs(t.pearson_r||0).toFixed(4)} ｜ 結論：${t.conclusions?.verdict||'—'}</div>`).join(''); }
+          else { topEl.style.display='none'; }
+        }catch(e){ console.warn('topK render failed', e); }
+
+        // expand/collapse handlers
+        document.getElementById('expandAll')?.addEventListener('click', ()=>{ derivedEl.querySelectorAll('div').forEach(d=>{ if(d && d.style) d.style.display='block'; }); });
+        document.getElementById('collapseAll')?.addEventListener('click', ()=>{ derivedEl.querySelectorAll('div').forEach(d=>{ if(d && d.style) d.style.display='none'; }); });
+
+        // update inference summary
+        try{ const inference = document.getElementById('inferenceResult'); if(inference){ const top6 = items.slice(0,6).map(it=>`${it.feature}: ${it.conclusions?.verdict||'—'}`); inference.innerHTML = `<div style="font-size:12px; line-height:1.3;">${top6.join('<br>')}</div>`;} }catch(e){}
+      }catch(e){ console.warn('loadLagStats failed', e); }
+    }
+
+    // load latest features (fundamentals + lag features) into leftFeatures
+    async function loadLatestFeatures(){
+      try{
+        const res = await fetch('/api/latest_features?max_items=200');
+        if(!res.ok) return;
+        const d = await res.json();
+        const el = document.getElementById('leftFeatures');
+        if(!el) return;
+        const latest = d.latest || d.latest_selected || {};
+        el.innerHTML = '';
+        const entries = Object.keys(latest).map(k=>[k, latest[k]]);
+        entries.forEach(([k,v])=>{
+          const row = document.createElement('div'); row.style.marginBottom='6px';
+          row.innerHTML = `<strong>${k}</strong>: ${v===null? '<em>null</em>': String(v)}`;
+          el.appendChild(row);
+        });
+      }catch(e){ console.warn('loadLatestFeatures failed', e); }
+    }
+    // call lag stats loader after diagnostics
+    (function(){
+      loadLagStats();
+      loadLatestFeatures();
+      document.getElementById('loadLagBtn')?.addEventListener('click', async ()=>{ document.getElementById('lagStatus').textContent='載入中...'; await loadLagStats(); document.getElementById('lagStatus').textContent='已載入'; });
+    })();
+    // load on start
+    (function(){
+      const s = document.getElementById('diagStatus'); if(s) loadDiagnostics();
+    })();
+
+    // background toggle logic
+    (function(){
+      const btn = document.getElementById('bgToggle'); const bg = document.getElementById('pageBg');
+  function setState(on){ if(bg) bg.style.display = on? 'block' : 'none'; btn.textContent = `背景：${on? '開': '關'}`; localStorage.setItem('pageBg', on? '1' : '0'); }
+  btn?.addEventListener('click', ()=>{ const on = !(localStorage.getItem('pageBg')==='1'); setState(on); });
+  try{ const stored = localStorage.getItem('pageBg'); setState(stored === null ? true : stored==='1'); }catch(e){}
+    })();
+
+    // background image loader/checker (debug helper)
+    (function(){
+      const statusEl = document.getElementById('bgStatus');
+      const bg = document.getElementById('pageBg');
+      const img = new Image();
+      const url = '/static/ComfyUI_00012_.png';
+      let loaded = false;
+      img.onload = function(){
+        loaded = true;
+        if(statusEl) statusEl.textContent = '背景狀態：圖片載入成功';
+        // ensure background element has the right URL (add cache-buster)
+        if(bg) bg.style.backgroundImage = `url('${url}?v=${Date.now()}')`; 
+        // force show if hidden
+        try{ if(bg && bg.style) bg.style.display = 'block'; }catch(e){}
+      };
+      img.onerror = function(ev){
+        if(statusEl) statusEl.textContent = '背景狀態：無法載入圖片（請檢查 /static 路徑）';
+        console.warn('background image load error', ev);
+      };
+      // start loading
+      try{ img.src = url; }catch(e){ if(statusEl) statusEl.textContent = '背景狀態：載入例外'; }
+    })();
+  </script>
+</body>
+</html>
