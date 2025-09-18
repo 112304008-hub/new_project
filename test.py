@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional, Iterable, Literal
 
 import requests, pandas as pd, numpy as np
+import time
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, FileResponse
 from zoneinfo import ZoneInfo
@@ -25,10 +26,9 @@ TZ_TW, TZ_US = "Asia/Taipei", "America/New_York"
 
 # ===== 小工具 =====
 def _key(override: Optional[str]) -> str:
+    # Return key if provided or env var; return None if not set to allow yfinance-only mode
     k = (override or os.getenv("TWELVE_DATA_KEY") or "").strip()
-    if not k:
-        raise RuntimeError("未提供 Twelve Data API key（?key= 或設 TWELVE_DATA_KEY）")
-    return k
+    return k or None
 
 def _td_series(symbol: str, key: str, start="2020-01-01", end=None, tz="America/New_York") -> pd.DataFrame:
     """回傳 [date, close] 升冪"""
@@ -193,37 +193,54 @@ def _stat_tests(df: pd.DataFrame, target: str, lags: Iterable[int]):
     return results
 
 # ===== 資料來源（含備援） =====
-def get_2330_ohlcv(key: str, start="2020-01-01", end=None) -> pd.DataFrame:
-    try:
-        # 先試 Twelve Data
-        p = {
-            "symbol": "2330:TWSE", "interval": "1day", "order": "asc", "outputsize": 5000,
-            "timezone": TZ_TW, "apikey": key, "start_date": start
-        }
-        if end: p["end_date"] = end
-        r = requests.get("https://api.twelvedata.com/time_series", params=p, timeout=20)
-        r.raise_for_status()
-        j = r.json()
-        if j.get("status") == "error": raise RuntimeError(j.get("message", "TD 錯誤"))
-        vals = j.get("values") or []
-        if not vals: raise RuntimeError("TD 空資料")
-        df = pd.DataFrame(vals)
-        for c in ["open", "high", "low", "close", "volume"]:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-        df["date"] = pd.to_datetime(df["datetime"]).dt.strftime("%Y-%m-%d")
-        return df[["date", "open", "high", "low", "close", "volume"]]
-    except Exception:
-        # fallback: yfinance
-        _ensure_yf()
-        hist = yf.Ticker("2330.TW").history(start=start, end=end, interval="1d", auto_adjust=False)
-        if hist is None or hist.empty:
-            raise RuntimeError("yfinance 取回 2330.TW 為空")
-        hist = hist.reset_index()
-        hist["date"] = pd.to_datetime(hist["Date"]).dt.strftime("%Y-%m-%d")
-        return hist.rename(columns={
-            "Open": "open", "High": "high", "Low": "low",
-            "Close": "close", "Volume": "volume"
-        })[["date","open","high","low","close","volume"]]
+def get_ohlcv(symbol: str, key: str, start="2020-01-01", end=None) -> pd.DataFrame:
+    """Return ohlcv DataFrame with columns date, open, high, low, close, volume.
+    symbol: e.g. '2330' or '2330:TWSE' or 'MSFT' (TwelveData friendly)."""
+    td_symbol = symbol
+    if symbol.isdigit():
+        td_symbol = f"{symbol}:TWSE"
+    # If a TwelveData key is provided, try TD first; otherwise use yfinance directly
+    if key:
+        try:
+            p = {
+                "symbol": td_symbol,
+                "interval": "1day",
+                "order": "asc",
+                "outputsize": 5000,
+                "timezone": TZ_TW if symbol.isdigit() else TZ_US,
+                "apikey": key,
+                "start_date": start,
+            }
+            if end:
+                p["end_date"] = end
+            r = requests.get("https://api.twelvedata.com/time_series", params=p, timeout=20)
+            r.raise_for_status()
+            j = r.json()
+            if j.get("status") == "error":
+                raise RuntimeError(j.get("message", "TD 錯誤"))
+            vals = j.get("values") or []
+            if not vals:
+                raise RuntimeError("TD 空資料")
+            df = pd.DataFrame(vals)
+            for c in ["open", "high", "low", "close", "volume"]:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+            df["date"] = pd.to_datetime(df["datetime"]).dt.strftime("%Y-%m-%d")
+            return df[["date", "open", "high", "low", "close", "volume"]].sort_values("date").reset_index(drop=True)
+        except Exception:
+            # fall through to yfinance
+            pass
+    # yfinance fallback or no key provided
+    _ensure_yf()
+    yf_sym = symbol if not symbol.isdigit() else f"{symbol}.TW"
+    hist = yf.Ticker(yf_sym).history(start=start, end=end, interval="1d", auto_adjust=False)
+    if hist is None or hist.empty:
+        raise RuntimeError(f"yfinance 取回 {yf_sym} 為空")
+    hist = hist.reset_index()
+    hist["date"] = pd.to_datetime(hist["Date"]).dt.strftime("%Y-%m-%d")
+    return hist.rename(columns={
+        "Open": "open", "High": "high", "Low": "low",
+        "Close": "close", "Volume": "volume"
+    })[["date","open","high","low","close","volume"]]
 
 def get_usdtwd(key: str, start="2020-01-01", end=None) -> pd.DataFrame:
     try:
@@ -240,18 +257,21 @@ def get_usdtwd(key: str, start="2020-01-01", end=None) -> pd.DataFrame:
         hist["USDTWD"] = pd.to_numeric(hist["Close"], errors="coerce")
         return hist[["date", "USDTWD"]]
 
-# ===== 建 2330 特徵 =====
-def build_2330(key: str, start="2020-01-01", end=None,
-               vol_mode: Literal["log", "rel", "raw", "both"] = "log") -> pd.DataFrame:
-    ohlcv = get_2330_ohlcv(key, start, end).copy()
+# ===== 建通用 symbol 特徵 =====
+def build_symbol(symbol: str, key: str, start="2020-01-01", end=None,
+                 vol_mode: Literal["log", "rel", "raw", "both"] = "log") -> pd.DataFrame:
+    ohlcv = get_ohlcv(symbol, key, start, end).copy()
     df = ohlcv.rename(columns={
         "date": "年月日","open":"開盤價(元)","high":"最高價(元)","low":"最低價(元)",
         "close":"收盤價(元)","volume":"成交量(千股)"
     })
-    df["成交量(千股)"] = df["成交量(千股)"]/1000.0
+    # normalize volume to 千股 if volume present
+    if "成交量(千股)" in df.columns:
+        df["成交量(千股)"] = df["成交量(千股)"]/1000.0
     df["年月日"] = pd.to_datetime(df["年月日"])
 
-    close = df["收盤價(元)"]; prev = close.shift(1)
+    close = df["收盤價(元)"]
+    prev = close.shift(1)
     df["報酬率％"] = close.pct_change()*100
     df["Gap％"]    = (df["開盤價(元)"]/prev-1)*100
     df["振幅％"]   = ((df["最高價(元)"]-df["最低價(元)"])/prev)*100
@@ -259,10 +279,11 @@ def build_2330(key: str, start="2020-01-01", end=None,
     df["MA5差％"]  = (close/df["MA5"]-1)*100
     df["MA20差％"] = (close/df["MA20"]-1)*100
     df["週幾"]     = df["年月日"].dt.weekday
-    if vol_mode in ("log","both"): df["成交量(千股)_log"] = np.log1p(df["成交量(千股)"])
-    if vol_mode in ("rel","both"):
+    if vol_mode in ("log","both") and "成交量(千股)" in df:
+        df["成交量(千股)_log"] = np.log1p(df["成交量(千股)"])
+    if vol_mode in ("rel","both") and "成交量(千股)" in df:
         med20 = df["成交量(千股)"].rolling(20).median()
-        df["成交量(千股)_rel20％"] = (df["成交量(千股)"]/med20-1)*100
+        df["成交量(千股)_rel20％"] = (df["成交量(千股) "]/med20-1)*100
 
     # 去除極端值
     df = _winsor(df, ["報酬率％","Gap％","振幅％","MA5差％","MA20差％",
@@ -282,6 +303,11 @@ def build_2330(key: str, start="2020-01-01", end=None,
     df = df.dropna().reset_index(drop=True)
     df["年月日"] = df["年月日"].dt.strftime("%Y-%m-%d")
     return df
+
+
+# backward compatibility wrapper
+def build_2330(key: str, start="2020-01-01", end=None, vol_mode: Literal["log", "rel", "raw", "both"] = "log") -> pd.DataFrame:
+    return build_symbol("2330", key, start=start, end=end, vol_mode=vol_mode)
 
 # ===== 併外生因子 =====
 def enrich(df: pd.DataFrame, key: str) -> pd.DataFrame:
@@ -313,14 +339,18 @@ def _write_timestamp_file(path: Path):
         print(f"[警告] 無法寫入時間檔：{e}")
 
 
-def perform_update(key: str) -> dict:
+def perform_update(key: str, symbol: Optional[str] = None) -> dict:
     """執行一次完整的資料建置、併入外生因子，並寫入 CSV 與 timestamp 檔。回傳摘要字典。"""
     print("perform_update: 開始建立資料...")
     k = _key(key)
-    base = build_2330(k)
+    # decide symbol
+    sym = symbol or "2330"
+    base = build_symbol(sym, k)
     full = enrich(base, k)
-    full.to_csv(OUTCSV, index=False, encoding="utf-8-sig")
-    _write_timestamp_file(OUTCSV)
+    # decide output path
+    outpath = OUTCSV if sym == "2330" else (DATA_DIR / f"{sym}_short_term_with_lag3.csv")
+    full.to_csv(outpath, index=False, encoding="utf-8-sig")
+    _write_timestamp_file(outpath)
 
     # 統計檢定
     stats = _stat_tests(full, target="收盤價(元)", lags=range(1, 6))
@@ -343,16 +373,51 @@ def perform_update(key: str) -> dict:
 
 
 @app.get("/api/quick")
-def api_quick(key: Optional[str] = None):
+def api_quick(key: Optional[str] = None, symbol: Optional[str] = None):
     try:
         print("/api/quick 被呼叫")
         k = _key(key)
-        summary = perform_update(k)
+        summary = perform_update(k, symbol=symbol)
         print("/api/quick 執行完成，返回結果。")
         return summary
     except Exception as e:
         print(f"/api/quick 發生錯誤：{e}")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+if __name__ == '__main__':
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument('--symbol', '-s', help='Single Symbol to build (e.g. 2330 or MSFT).', default=None)
+    p.add_argument('--symbols', help='Comma-separated symbols to batch build (e.g. 2330,MSFT,AAPL).', default=None)
+    p.add_argument('--key', '-k', help='Twelve Data API key or set TWELVE_DATA_KEY env var', default=None)
+    args = p.parse_args()
+    k = args.key or os.getenv('TWELVE_DATA_KEY')
+    # if symbols provided, run batch
+    if args.symbols:
+        syms = [s.strip() for s in args.symbols.split(',') if s.strip()]
+        summary = {"ok": True, "results": {}}
+        for s in syms:
+            try:
+                print(f"Building {s}...")
+                res = perform_update(k, symbol=s)
+                summary["results"][s] = {"ok": True, "saved_to": res.get("saved_to" if "saved_to" in res else str(DATA_DIR / f"{s}_short_term_with_lag3.csv")), "rows": res.get("rows")}
+            except Exception as e:
+                summary["results"][s] = {"ok": False, "error": str(e)}
+        ts = int(time.time())
+        outp = DATA_DIR / f"batch_{ts}_summary.json"
+        with outp.open('w', encoding='utf-8') as f:
+            import json
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+        print('Wrote batch summary to', outp)
+        print(summary)
+        raise SystemExit(0)
+    else:
+        # single symbol fallback (default behavior)
+        print('Running perform_update for single symbol (or default 2330)')
+        summary = perform_update(k, symbol=args.symbol)
+        import json
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 @app.get("/download")
 def download():

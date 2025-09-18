@@ -31,7 +31,20 @@
       background: radial-gradient(ellipse at center, rgba(0,0,0,.18), rgba(0,0,0,0) 70%);
       filter: blur(2px);
     }
-  .lottery-tube{ position:relative; display:inline-block; cursor:pointer; outline:none; z-index:10010 !important; transform:translateZ(0); will-change:transform; }
+    /* 強制可讀 Badge：白底黑字、較高 z-index，避免被背景或 mix-blend-mode 蓋掉 */
+    .badge-visible{
+      background: rgba(255,255,255,0.96) !important;
+      color: #000 !important;
+      padding: 8px 12px !important;
+      border-radius: 8px !important;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.18) !important;
+      display: inline-block !important;
+      position: relative !important;
+      z-index: 99999 !important;
+      mix-blend-mode: normal !important;
+      pointer-events: auto !important;
+    }
+    .lottery-tube{ position:relative; display:inline-block; cursor:pointer; outline:none; z-index:10010 !important; transform:translateZ(0); will-change:transform; }
     .lottery-tube:focus-visible{ box-shadow: 0 0 0 4px rgba(212, 175, 55, .35); border-radius: 16px; }
     .tube, .label, .mouth, .rim, .sticks, .mini-stick, .drawn-stick { pointer-events:none; }
     .tube{
@@ -150,15 +163,64 @@
     .parchment::-webkit-scrollbar-thumb{ background: linear-gradient(#d6c29a,#cbb785); border-radius:8px; border:2px solid rgba(0,0,0,0.03); }
     .parchment .section-title{ font-weight:700; color:#7c2417; margin-bottom:8px; }
 
-    /* aged parchment tweaks and scroll rods */
-    .scroll-with-rods{ position:fixed; box-shadow: 0 18px 36px rgba(0,0,0,0.22); border-radius:12px; overflow:visible; }
-    .scroll-with-rods .rod{ position:absolute; left:50%; transform:translateX(-50%); width:92%; height:18px; border-radius:10px; box-shadow: 0 6px 12px rgba(0,0,0,0.18); }
-    .scroll-with-rods .rod-top{ top:8px; }
-    .scroll-with-rods .rod-bottom{ bottom:8px; }
-    .scroll-with-rods .rod::before{ content:''; position:absolute; left:0; right:0; top:0; bottom:0; border-radius:10px; background: linear-gradient(90deg, #ffd86b, #d6ac3c 45%, #ffd86b); box-shadow: inset 0 1px 0 rgba(255,255,255,0.5); }
-    /* small finials at ends */
-    .scroll-with-rods .rod::after{ content:''; position:absolute; width:18px; height:18px; border-radius:50%; background: radial-gradient(circle at 40% 30%, #fff7d6, #c38b2a); top:50%; transform:translateY(-50%); left:-12px; box-shadow: 0 3px 6px rgba(0,0,0,0.18); }
+    /* rods: keep decorative rods fixed to the container top/bottom;
+       make actual textual content scroll inside an inner scrolling region. */
+    .scroll-with-rods{
+      box-shadow: 0 18px 36px rgba(0,0,0,0.22);
+      border-radius:12px;
+      position:relative; /* container positioned by inline styles (fixed left/right) */
+      padding-left: 18px;
+      padding-right: 18px;
+      box-sizing: border-box;
+      background-clip: padding-box;
+      overflow: visible; /* outer container holds overlay rods; inner area will scroll */
+    }
+    /* decorative rods are absolutely positioned inside the container so they stay at top/bottom */
+    .scroll-with-rods .rod{
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 92%;
+      height: 18px;
+      border-radius:10px;
+      box-shadow: 0 6px 12px rgba(0,0,0,0.18);
+      pointer-events: none;
+      z-index: 2; /* below text content (text will be z-index:3) */
+      top: 8px;
+    }
+    .scroll-with-rods .rod-bottom{ top: auto; bottom: 8px; }
+    .scroll-with-rods .rod::before{
+      content:'';
+      position:absolute;
+      left:0; right:0; top:0; bottom:0;
+      border-radius:10px;
+      background: linear-gradient(90deg, #ffd86b, #d6ac3c 45%, #ffd86b);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
+      pointer-events:none;
+      z-index:2;
+    }
+    .scroll-with-rods .rod::after{
+      content:'';
+      position:absolute;
+      width:18px; height:18px; border-radius:50%;
+      background: radial-gradient(circle at 40% 30%, #fff7d6, #c38b2a);
+      top:50%; transform:translateY(-50%);
+      left:-12px; box-shadow: 0 3px 6px rgba(0,0,0,0.18);
+      pointer-events:none; z-index:2;
+    }
     .scroll-with-rods .rod-bottom::after{ left:auto; right:-12px; }
+    /* inner scrolling region (content scrolls here, rods remain fixed to container edges) */
+    .scroll-with-rods .scroll-inner{
+      position: absolute;
+      top: 36px;
+      bottom: 36px;
+      left: 0;
+      right: 0;
+      overflow: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 8px 6px; /* inner padding for text */
+      z-index: 3; /* ensure text sits above rods */
+    }
 
     /* age the parchment: darker edges, vignette, stains and paper grain */
     .parchment{ background-color:#f5e8d4; background-image:
@@ -195,8 +257,23 @@
       opacity:0.50; filter: saturate(1.12) contrast(1.08) brightness(1.02); pointer-events:none;
       transition: opacity .25s ease, filter .25s ease; mix-blend-mode: multiply;
     }
-    /* ensure main interactive content sits above the background */
-    .stage, .parchment, .lottery-tube, .scroll-with-rods { z-index: 30; position: relative; }
+    /* ensure main interactive content sits above the background;
+       do NOT override .scroll-with-rods positioning (we want its earlier fixed/absolute rules to apply) */
+    .stage, .parchment, .lottery-tube { z-index: 30; position: relative; }
+    .scroll-with-rods { z-index: 30; /* keep position as declared above */ }
+    /* override: when parchment is also scroll-with-rods, keep it fixed and scrollable
+       so the decorative rods stay flush to the container top/bottom while content scrolls */
+    .parchment.scroll-with-rods{
+      position: fixed !important;
+      overflow: auto !important;
+      box-sizing: border-box;
+      /* ensure rods sit near edges and content scrolls between them */
+      padding-top: 36px !important;
+      padding-bottom: 36px !important;
+    }
+    /* slightly nudge rod to container edges (adjust as needed) */
+    .scroll-with-rods .rod-top{ top: 8px; }
+    .scroll-with-rods .rod-bottom{ bottom: 8px; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
@@ -231,10 +308,12 @@
         <div class="label" aria-hidden="true"></div>
       </div>
       <div class="drawn-stick" id="drawnStick" aria-hidden="true"><span id="bigChar">吉</span></div>
-      <button class="hit-area" id="hit" aria-label="抽籤" onclick="drawStick()"></button>
+      <button class="hit-area" id="hit" aria-label="抽籤" onclick="drawStick()" disabled></button>
     </div>
 
-    <div class="hint">點一下（或按 Enter/空白鍵 / 觸控）試試看。</div>
+    <div id="hint" class="hint badge-visible" style="margin-top:12px;">
+      點一下（或按 Enter/空白鍵 / 觸控）試試看。
+    </div>
 
     <div class="omikuji" id="omikuji" role="status" aria-live="polite" hidden>
       <div class="title" id="q-title">預測結果</div>
@@ -247,44 +326,60 @@
   <button id="bgToggle" style="position:fixed; right:14px; top:18px; z-index:20000; padding:8px 10px; border-radius:8px; background:#fffef8; border:1px solid rgba(0,0,0,.08);">背景：關</button>
   <div id="bgStatus" style="position:fixed; right:14px; top:58px; z-index:20000; padding:6px 8px; border-radius:8px; background:#fffef8; border:1px solid rgba(0,0,0,.06); font-size:12px;">背景狀態：未知</div>
 
-    <button id="test" type="button">（測試）按我也會抽</button>
-    <div id="debug"></div>
+    <button id="test" type="button" disabled>（測試）按我也會抽</button>
+    <div style="margin-top:10px; font-size:13px;">
+      <label for="symbolInput" style="font-weight:700; margin-right:6px;">公司代號：</label>
+      <input list="symbols" id="symbolInput" placeholder="例如：2330 或 AAPL" style="padding:6px; border-radius:6px; width:140px;" />
+      <datalist id="symbols">
+        <option value="2330">2330 (TSMC)</option>
+        <option value="2317">2317 (Hon Hai)</option>
+        <option value="AAPL">AAPL</option>
+        <option value="MSFT">MSFT</option>
+      </datalist>
+    </div>
+    <!-- 初始不顯示「完成」，抽籤後由 drawStick() 更新（顯示三秒後自動隱藏） -->
+    <div id="debug" class="badge-visible" style="margin-top:10px; display:none;">
+    </div>
   </div>
 
   <!-- Left parchment scroll: latest data (fundamentals + lag features) -->
-  <div id="leftScroll" class="parchment scroll-with-rods" style="position:fixed; left:10px; top:80px; width:320px; padding:36px 18px; z-index:12; font-size:13px; display:block;">
+  <div id="leftScroll" class="parchment scroll-with-rods" style="position:fixed; left:10px; top:80px; bottom:80px; width:320px; box-sizing:border-box; z-index:12; font-size:13px; display:none;">
     <div class="rod rod-top" aria-hidden="true"></div>
-    <div style="font-weight:800; color:#7c2417; margin-bottom:8px;">最新資料（基本面 + 滯後特徵）</div>
-    <div id="leftFeatures" style="line-height:1.4; color:#222; max-height:calc(100vh - 220px); overflow:auto;"></div>
+    <div class="scroll-inner">
+      <div style="font-weight:800; color:#7c2417; margin-bottom:8px;">最新資料（基本面 + 滯後特徵）</div>
+      <div id="leftFeatures" style="line-height:1.4; color:#222;"></div>
+    </div>
     <div class="rod rod-bottom" aria-hidden="true"></div>
-    <div class="stain"></div>
-  <div class="fray"></div>
-  <div class="fray bot"></div>
-  </div>
+     <div class="stain"></div>
+   <div class="fray"></div>
+   <div class="fray bot"></div>
+   </div>
 
   <!-- Right parchment scroll: statistical inference and derivation -->
-  <div id="rightScroll" class="parchment scroll-with-rods" style="position:fixed; right:10px; top:80px; width:320px; padding:36px 18px; z-index:12; font-size:13px; display:block;">
+  <div id="rightScroll" class="parchment scroll-with-rods" style="position:fixed; right:10px; top:80px; bottom:80px; width:320px; box-sizing:border-box; z-index:12; font-size:13px; display:none;">
     <div class="rod rod-top" aria-hidden="true"></div>
-    <div style="font-weight:800; color:#7c2417; margin-bottom:8px;">統計推論（假設檢定 / 推導）</div>
-    <div id="hypothesisMath" style="line-height:1.5; color:#222;"></div>
-    <div style="margin-top:10px; font-weight:700;">推論結果總覽</div>
-    <div id="inferenceResult" style="margin-top:6px; font-size:13px; color:#111;"></div>
-    <div style="margin-top:10px; font-weight:700;">每欄位檢定詳述（包含推導過程與結論）</div>
-    <div style="margin-top:6px; display:flex; gap:8px; align-items:center;">
-      <button id="loadLagBtn" style="padding:6px 8px; font-size:13px;">載入滯後統計</button>
-      <span id="lagStatus" style="font-size:12px; color:#666;">(尚未載入)</span>
+    <div class="scroll-inner">
+      <div style="font-weight:800; color:#7c2417; margin-bottom:8px;">統計推論（假設檢定 / 推導）</div>
+      <div id="hypothesisMath" style="line-height:1.5; color:#222;"></div>
+      <div style="margin-top:10px; font-weight:700;">推論結果總覽</div>
+      <div id="inferenceResult" style="margin-top:6px; font-size:13px; color:#111;"></div>
+      <div style="margin-top:10px; font-weight:700;">每欄位檢定詳述（包含推導過程與結論）</div>
+      <div style="margin-top:6px; display:flex; gap:8px; align-items:center;">
+        <button id="loadLagBtn" style="padding:6px 8px; font-size:13px;">載入滯後統計</button>
+        <span id="lagStatus" style="font-size:12px; color:#666;">(尚未載入)</span>
+      </div>
+      <div id="topK" style="margin-top:8px; padding:8px; background:#fffef8; border:1px solid rgba(0,0,0,.05); display:none;">
+        <strong>Top 5（依 |pearson_r|）</strong>
+        <div id="topKList" style="margin-top:6px; font-size:13px;"></div>
+      </div>
+      <div style="margin-top:6px; display:flex; gap:8px; align-items:center;"><button id="expandAll" style="padding:6px 8px; font-size:12px;">全部展開</button><button id="collapseAll" style="padding:6px 8px; font-size:12px;">全部收合</button></div>
+      <div id="derivedFeatures" style="margin-top:6px; font-size:13px; color:#111;"></div>
     </div>
-    <div id="topK" style="margin-top:8px; padding:8px; background:#fffef8; border:1px solid rgba(0,0,0,.05); display:none;">
-      <strong>Top 5（依 |pearson_r|）</strong>
-      <div id="topKList" style="margin-top:6px; font-size:13px;"></div>
-    </div>
-    <div style="margin-top:6px; display:flex; gap:8px; align-items:center;"><button id="expandAll" style="padding:6px 8px; font-size:12px;">全部展開</button><button id="collapseAll" style="padding:6px 8px; font-size:12px;">全部收合</button></div>
-    <div id="derivedFeatures" style="margin-top:6px; font-size:13px; color:#111; max-height:calc(100vh - 360px); overflow:auto;"></div>
     <div class="rod rod-bottom" aria-hidden="true"></div>
-    <div class="stain s2"></div>
-  <div class="fray"></div>
-  <div class="fray bot"></div>
-  </div>
+     <div class="stain s2"></div>
+   <div class="fray"></div>
+   <div class="fray bot"></div>
+   </div>
 
   <!-- Control panel removed. Left/Right scrolls replace the white panel visually. -->
 
@@ -328,7 +423,20 @@
       const debug       = document.getElementById('debug');
       const hit         = document.getElementById('hit');
 
-      if(debug) debug.innerHTML = '<span class="spinner" aria-hidden="true"></span> 開始預測…';
+      // require symbol before allowing draw
+      const selectedSymbol = document.getElementById('symbolInput')?.value?.trim() || '';
+      if(!selectedSymbol){
+        if(debug){
+          debug.style.display = 'inline-block';
+          debug.textContent = '請先選擇公司代號後再抽籤';
+        }
+        return;
+      }
+
+      if(debug){
+        debug.style.display = 'inline-block';
+        debug.innerHTML = '<span class="spinner" aria-hidden="true"></span> 開始預測…';
+      }
       if(hit) hit.setAttribute('disabled','disabled');
 
       // animation
@@ -340,17 +448,27 @@
 
       let res, data;
       try{
-        res = await fetch('/api/draw?model=rf');
+  const symbol = document.getElementById('symbolInput')?.value?.trim() || '';
+        const q = symbol ? `?model=rf&symbol=${encodeURIComponent(symbol)}` : `?model=rf`;
+        res = await fetch(`/api/draw${q}`);
         data = await res.json();
       }catch(e){
-        if(debug) debug.textContent = '網路錯誤，無法連線到後端';
+        if(debug){
+          // 顯示錯誤並保留，直到使用者選擇/變更股票或下一次抽籤覆寫
+          debug.style.display = 'inline-block';
+          debug.textContent = '網路錯誤，無法連線到後端';
+        }
         if(hit) hit.removeAttribute('disabled');
         return;
       }
 
       if(!res.ok || !data){
         textEl.innerHTML = `<p>系統錯誤，請稍後再試。</p>`;
-        if(debug) debug.textContent = '預測失敗。';
+        if(debug){
+          // 顯示失敗訊息並保留，直到使用者選擇/變更股票或下一次抽籤覆寫
+          debug.style.display = 'inline-block';
+          debug.textContent = '預測失敗。';
+        }
         if(hit) hit.removeAttribute('disabled');
         return;
       }
@@ -359,7 +477,9 @@
       const label = (data.label || f.label || '').trim();
       if(label === '漲'){ bigChar.textContent = '吉'; } else if(label === '跌'){ bigChar.textContent = '凶'; } else { bigChar.textContent = '？'; }
 
-      titleEl.textContent = f.title || '預測結果';
+  // show symbol/company in title if available
+  const sym = data.symbol || (document.getElementById('symbolInput')?.value || '');
+  titleEl.textContent = (sym ? `${sym} ` : '') + (f.title || '預測結果');
       const lines = Array.isArray(f.text) ? f.text : (f.text? [f.text] : []);
       textEl.innerHTML = `<p>${lines.join('<br>')}</p>` + (f.advice ? `<p style="margin-top:8px; color:#b3212d;">建議：${f.advice}</p>` : '');
 
@@ -383,7 +503,17 @@
       try{ if(typeof loadLatestFeatures === 'function') loadLatestFeatures(); }catch(e){ console.warn('refresh left features failed', e); }
 
       if(data.warning){ warnEl.style.display = 'block'; warnEl.textContent = data.warning; }
-      if(debug) debug.textContent = '完成。';
+      if(debug){
+        // 完成訊息保留，直到使用者選擇下一間股票（或執行下一次抽籤時被覆寫）
+        debug.style.display = 'inline-block';
+        debug.textContent = '完成。';
+        // 讓使用者可以立即選擇/開啟選單挑選下一家公司
+        const symInput = document.getElementById('symbolInput');
+        if(symInput){
+          // focus + select 文字，方便改輸入或下拉（部分瀏覽器會顯示 datalist）
+          try{ symInput.removeAttribute('disabled'); symInput.focus(); symInput.select(); }catch(e){}
+        }
+      }
       if(hit) hit.removeAttribute('disabled');
       // refresh left latest-data after draw
       try{ if(typeof loadLatestFeatures === 'function') loadLatestFeatures(); }catch(e){ console.warn('refresh latest after draw failed', e); }
@@ -469,7 +599,9 @@
       const fld = document.getElementById('fieldSelect').value; if(!fld) return alert('請先選擇欄位');
       try{
         setAnalysisControls(false);
-        const res = await fetch(`/api/series?feature=${encodeURIComponent(fld)}&n=500`); const d = await res.json();
+        const symbol = document.getElementById('symbolInput')?.value?.trim();
+        const symQ = symbol ? `&symbol=${encodeURIComponent(symbol)}` : '';
+        const res = await fetch(`/api/series?feature=${encodeURIComponent(fld)}&n=500${symQ}`); const d = await res.json();
         const vals = d.values || [];
         const canvas = document.getElementById('seriesChart'); if(!canvas) return; const ctx = canvas.getContext && canvas.getContext('2d');
         if(!ctx) return alert('無法取得畫布上下文');
@@ -484,9 +616,11 @@
 
     document.getElementById('downloadReport')?.addEventListener('click', async ()=>{
       const fld = document.getElementById('fieldSelect').value; if(!fld) return alert('請先選擇欄位');
-      const resp1 = await fetch(`/api/stattests?feature=${encodeURIComponent(fld)}`); const st = await resp1.json();
-      const resp2 = await fetch(`/api/series?feature=${encodeURIComponent(fld)}&n=500`); const ser = await resp2.json();
-      const report = {feature: fld, stattests: st, series: ser};
+      const symbol = document.getElementById('symbolInput')?.value?.trim();
+      const symQ = symbol ? `&symbol=${encodeURIComponent(symbol)}` : '';
+      const resp1 = await fetch(`/api/stattests?feature=${encodeURIComponent(fld)}${symQ}`); const st = await resp1.json();
+      const resp2 = await fetch(`/api/series?feature=${encodeURIComponent(fld)}&n=500${symQ}`); const ser = await resp2.json();
+      const report = {feature: fld, symbol: symbol||null, stattests: st, series: ser};
       const blob = new Blob([JSON.stringify(report, null, 2)], {type:'application/json'});
       const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download=`report_${fld}.json`; a.click(); URL.revokeObjectURL(url);
     });
@@ -496,7 +630,9 @@
       const fld = document.getElementById('fieldSelect').value; if(!fld) return;
       try{
         showPanelSpinner(); setAnalysisControls(false);
-        const res = await fetch(`/api/stattests?feature=${encodeURIComponent(fld)}`); const r = await res.json();
+        const symbol = document.getElementById('symbolInput')?.value?.trim();
+        const symQ = symbol ? `&symbol=${encodeURIComponent(symbol)}` : '';
+        const res = await fetch(`/api/stattests?feature=${encodeURIComponent(fld)}${symQ}`); const r = await res.json();
         const sr = document.getElementById('statResults'); sr.innerHTML = `Shapiro W: ${r.shapiro.stat?.toFixed(4)||'N/A'} p=${r.shapiro.p?.toFixed(4)||'N/A'}<br/>t-test t=${r.ttest.stat?.toFixed(4)||'N/A'} p=${r.ttest.p?.toFixed(4)||'N/A'}<br/>ADF stat=${r.adf.stat?.toFixed(4)||'N/A'} p=${r.adf.p?.toFixed(4)||'N/A'}`;
 
         // render inference into left scroll: show math with KaTeX and verbal conclusion
@@ -573,7 +709,9 @@
     // load lag stats and render in derived features area
     async function loadLagStats(){
       try{
-        const res = await fetch('/api/lag_stats');
+        const symbol = document.getElementById('symbolInput')?.value?.trim();
+        const q = symbol ? `?symbol=${encodeURIComponent(symbol)}` : '';
+        const res = await fetch('/api/lag_stats' + q);
         if(!res.ok) return;
         const d = await res.json();
         if(!d.ok) return;
@@ -636,7 +774,7 @@
           const sorted = items.slice().sort((a,b)=> Math.abs(b.pearson_r||0) - Math.abs(a.pearson_r||0));
           const top = sorted.slice(0,5);
           const topEl = document.getElementById('topK'); const topList = document.getElementById('topKList');
-          if(top.length>0){ topEl.style.display='block'; topList.innerHTML = top.map(t=>`<div><strong>${t.feature}</strong> — |r|=${Math.abs(t.pearson_r||0).toFixed(4)} ｜ 結論：${t.conclusions?.verdict||'—'}</div>`).join(''); }
+          if(top.length>0){ topEl.style.display='block'; topList.innerHTML = top.map(t=>`<div><strong>${t.feature}</strong> — |r|=${Math.abs(t.pearson_r||0).toFixed(4)} ｜ 結论：${t.conclusions?.verdict||'—'}</div>`).join(''); }
           else { topEl.style.display='none'; }
         }catch(e){ console.warn('topK render failed', e); }
 
@@ -652,7 +790,9 @@
     // load latest features (fundamentals + lag features) into leftFeatures
     async function loadLatestFeatures(){
       try{
-        const res = await fetch('/api/latest_features?max_items=200');
+        const symbol = document.getElementById('symbolInput')?.value?.trim();
+        const q = symbol ? `?symbol=${encodeURIComponent(symbol)}&max_items=200` : '?max_items=200';
+        const res = await fetch('/api/latest_features' + q);
         if(!res.ok) return;
         const d = await res.json();
         const el = document.getElementById('leftFeatures');
@@ -667,11 +807,74 @@
         });
       }catch(e){ console.warn('loadLatestFeatures failed', e); }
     }
-    // call lag stats loader after diagnostics
+
+    // call lag stats loader after diagnostics; respect selected symbol
     (function(){
-      loadLagStats();
-      loadLatestFeatures();
       document.getElementById('loadLagBtn')?.addEventListener('click', async ()=>{ document.getElementById('lagStatus').textContent='載入中...'; await loadLagStats(); document.getElementById('lagStatus').textContent='已載入'; });
+      const symInput = document.getElementById('symbolInput');
+      if(symInput){
+        symInput.addEventListener('change', async ()=>{ 
+          try{
+            // hide previous omikuji (讓畫面回到未抽狀態)，並清除完成訊息以便再次互動
+            const omikujiEl = document.getElementById('omikuji');
+            if(omikujiEl){ omikujiEl.hidden = true; omikujiEl.classList.remove('show'); }
+            const debug = document.getElementById('debug');
+            if(debug){ debug.style.display = 'none'; debug.textContent = ''; }
+            const sym = symInput.value?.trim();
+            if(sym){
+              // show side panels and enable draw/test
+              const left = document.getElementById('leftScroll'); const right = document.getElementById('rightScroll');
+              if(left) left.style.display = 'block';
+              if(right) right.style.display = 'block';
+              const hit = document.getElementById('hit'); if(hit) hit.removeAttribute('disabled');
+              const testBtn = document.getElementById('test'); if(testBtn) testBtn.removeAttribute('disabled');
+              await loadLatestFeatures();
+              await loadLagStats();
+            }
+          }catch(e){ console.warn('symbol change handlers failed', e); }
+        });
+        symInput.addEventListener('input', ()=>{ /* live suggestions */ });
+      }
+    })();
+    // populate symbol datalist dynamically from server and refresh UI periodically
+    (async function populateSymbolsAndAutoRefresh(){
+      try{
+        const r = await fetch('/api/list_symbols');
+        if(r.ok){
+          const j = await r.json();
+          // only replace datalist when server returns a non-empty symbols array
+          if(Array.isArray(j.symbols) && j.symbols.length > 0){
+            const dl = document.getElementById('symbols');
+            if(dl){
+              dl.innerHTML = '';
+              j.symbols.forEach(s=>{
+                const o = document.createElement('option'); o.value = s.symbol; o.textContent = s.symbol; dl.appendChild(o);
+              });
+            }
+          } else {
+            console.warn('list_symbols returned empty — keeping existing datalist options');
+          }
+        }
+      }catch(e){ console.warn('populate symbols failed', e); }
+
+      // ensure at least some fallback static options exist so user can pick even if server fails
+      try{
+        const dl = document.getElementById('symbols');
+        if(dl && dl.children.length === 0){
+          const fallback = ['2330','2317','AAPL','MSFT'];
+          fallback.forEach(v=>{ const o = document.createElement('option'); o.value = v; o.textContent = v; dl.appendChild(o); });
+        }
+      }catch(e){ /* ignore */ }
+
+      // force-refresh latest features and lag stats every 5 minutes
+      const FIVE_MIN = 5 * 60 * 1000;
+      setInterval(()=>{ 
+        try{ 
+          const sym = document.getElementById('symbolInput')?.value?.trim();
+          const left = document.getElementById('leftScroll');
+          if(sym && left && left.style.display !== 'none'){ loadLatestFeatures(); loadLagStats(); }
+        }catch(e){ console.warn('periodic refresh failed', e); } 
+      }, FIVE_MIN);
     })();
     // load on start
     (function(){

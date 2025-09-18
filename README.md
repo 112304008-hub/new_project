@@ -1,91 +1,78 @@
-# 新專案
+# 股價短期預測服務
 
-這是一個使用 **FastAPI** 建立的應用程式，用於進行股價預測。它提供一個網頁介面，讓使用者與預測模型互動，並根據歷史數據獲取預測結果。
+簡介  
+本專案是一個以 FastAPI 建置的輕量化股價短期預測系統。系統以歷史交易資料為基礎，提供模型推論服務與互動式前端，可對單一股票產生下一交易日上漲機率與二元標籤（漲 / 跌）。設計目標為可重現、容易整合與便於本地開發測試。
 
-## 功能特色
+重點功能
+- Web 前端：互動式頁面供使用者選擇股票、觸發預測並檢視推論與統計檢定結果。  
+- REST API：簡潔的 API（如 /api/draw）供自動化流程或外部系統呼叫。  
+- 多模型支援：內建隨機森林（rf）與邏輯迴歸（lr）兩種模型。  
+- 門檻最佳化：於驗證集上搜尋最佳分類閾值（以 F1 為準則）。  
+- 資料處理：載入 CSV、計算滯後與衍生特徵並執行預測流程。
 
-- **網頁介面**：簡單的網頁入口，作為使用者的主要互動平台。
-- **API 端點**：提供 API 介面，讓使用者根據所選模型獲取預測。
-- **資料處理**：整合 CSV 檔案，提供即時的預測能力。
-- **模型支援**：支援兩種機器學習模型：隨機森林（`rf`）與邏輯迴歸（`lr`）。
-- **自訂門檻值**：利用驗證資料動態決定最佳預測門檻值。
+目錄結構（關鍵）
+- main.py — FastAPI 應用程式入口  
+- stock.py — 資料前處理、模型訓練與 predict 函式  
+- template2.html — 前端頁面（互動 UI 與顯示）  
+- check_twelve.py — 若需，透過 Twelve Data 取得或更新歷史資料  
+- data/short_term_with_lag3.csv — 預期之歷史資料檔案
 
-## 安裝與設定步驟
+快速上手（Windows 範例）
+1. 取得原始碼
+```bash
+git clone <repository-url>
+cd new-project
+```
 
-1. **下載專案**：
-   ```bash
-   git clone <repository-url>
-   cd new-project
-   ```
+2. 建議建立虛擬環境並安裝套件
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1   # PowerShell
+pip install -r requirements.txt
+```
+備註：若沒有 requirements.txt，可安裝基本套件：
+```powershell
+pip install fastapi uvicorn scikit-learn pandas
+```
 
-2. **安裝依賴套件**：
-   確保已安裝 Python，然後執行以下指令安裝所需套件：
-   ```bash
-   pip install fastapi uvicorn scikit-learn pandas
-   ```
+3. 準備資料  
+- 將歷史資料放在 data/short_term_with_lag3.csv（欄位格式請參照專案中 stock.py 所需欄位）。  
+- 若無現成資料，可使用 check_twelve.py 並提供 Twelve Data API key 以抓取。
 
-3. **準備資料**：
-   - 確保存在 `data/short_term_with_lag3.csv` 檔案，該檔案包含歷史股價數據，作為訓練與預測的依據。
-   - 若缺少該檔案，可以執行 `check_twelve.py` 腳本，透過 Twelve Data API 抓取資料。
+4. 啟動服務
+```powershell
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+打開瀏覽器前往 http://localhost:8000
 
-4. **啟動應用程式**：
-   使用以下指令啟動 FastAPI：
-   ```bash
-   uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-   ```
+API 使用範例
+- 產生一次預測（GET）
+```bash
+curl "http://localhost:8000/api/draw?model=rf"
+```
+參數：
+- model: "rf"（隨機森林）或 "lr"（邏輯迴歸），預設 "rf"
 
-5. **存取網頁介面**：
-   開啟瀏覽器並前往 `http://localhost:8000` 以進入應用程式。
+CLI 使用（快速測試）
+```bash
+python stock.py --model rf --csv data/short_term_with_lag3.csv
+```
+常用選項：--model, --csv
 
-## 使用方式
+系統流程概述
+1. 資料前處理：讀取 CSV、填補缺值、產生滯後與衍生特徵。  
+2. 模型訓練/載入：訓練或載入預先儲存之模型（視程式實作）。  
+3. 門檻搜尋：在驗證資料上搜尋最佳分類閾值以最大化 F1。  
+4. 預測回傳：輸出上漲機率、使用門檻與二元標籤；前端同時顯示詳細欄位檢定結果。
 
-### 網頁介面
-- 首頁（`/`）提供簡單的使用者互動介面。
-- 若 `template2.html` 檔案缺失，系統將回傳 JSON 格式的錯誤訊息。
+開發與測試建議
+- 本地開發請使用 uvicorn --reload 以便即時看到變更。  
+- 將資料處理與模型邏輯撰寫為可測試的函式，使用 pytest 撰寫單元測試（資料邏輯、閾值搜尋、輸出格式等）。
 
-### API 端點
-- **`/api/draw`**：根據所選模型生成預測結果。
-  - 查詢參數：
-    - `model`: 選擇 `"rf"`（隨機森林）或 `"lr"`（邏輯迴歸），預設為 `"rf"`。
-  - 範例：
-    ```bash
-    curl "http://localhost:8000/api/draw?model=rf"
-    ```
+部署與注意事項
+- 建議在生產環境使用容器化（Docker）與反向代理（如 nginx）。  
+- 對外服務時請做好 API 金鑰（若使用第三方資料）的保護與日誌控管。  
+- 模型結果僅供參考，不構成投資建議；使用者應自行承擔交易風險。
 
-### 命令列介面
-- 可直接透過命令列執行 `stock.py` 進行預測：
-  ```bash
-  python stock.py --model rf
-  ```
-  - 可選參數：
-    - `--csv`: 指定 CSV 檔案路徑（預設為 `data/short_term_with_lag3.csv`）。
-    - `--model`: 選擇 `"rf"` 或 `"lr"`。
-
-### 預測流程
-
-1. **資料前處理**：
-   - `stock.py` 中的 `predict` 函數會讀取 CSV 並進行前處理。
-   - 缺失值會用訓練數據的中位數補齊。
-
-2. **模型訓練**：
-   - 訓練兩個模型：隨機森林與邏輯迴歸。
-   - 資料會拆分成訓練核心集與驗證集，用來決定最佳門檻值。
-
-3. **門檻值最佳化**：
-   - `_best_threshold` 函數會根據 F1 分數計算最佳預測門檻。
-
-4. **預測**：
-   - 使用 CSV 檔案的最後一列資料作為輸入，預測下一個交易日股價走勢。
-   - 預測結果包含：上漲機率、門檻值與最終標籤（"漲" / "跌"）。
-
-## 專案結構
-
-- `main.py`: FastAPI 應用程式的入口。
-- `stock.py`: 包含資料前處理、模型訓練與預測邏輯。
-- `check_twelve.py`: 與 Twelve Data API 互動的工具腳本。
-- `data/short_term_with_lag3.csv`: 訓練與預測用的主要數據檔案。
-- `README.md`: 專案文件說明。
-
-## 授權
-
-本專案採用 **MIT 授權條款**。
+授權
+本專案採 MIT 授權。請參閱 LICENSE 檔案以取得授權條款細節。
