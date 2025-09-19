@@ -1,0 +1,12 @@
+__pycache__/
+.venv/
+venv/
+*.pyc
+.git
+.gitignore
+data/*.csv
+data/*.txt
+models/
+*.log
+env/
+node_modules/
