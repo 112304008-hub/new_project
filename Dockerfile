@@ -1,14 +1,7 @@
 FROM python:3.11-slim
 
-# Install system dependencies required for some scientific packages
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       build-essential \
-       gcc \
-       g++ \
-       curl \
-       ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Minimal image: rely on manylinux wheels (no apt layer to avoid blocked mirrors)
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 
@@ -22,10 +15,14 @@ COPY . /app
 
 EXPOSE 8000
 
-ENV PYTHONUNBUFFERED=1
-
-# Healthcheck for docker
+# Lightweight healthcheck using stdlib (avoids curl dependency)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8000/ || exit 1
+  CMD python - <<'PY' || exit 1
+import urllib.request, sys
+try:
+    urllib.request.urlopen('http://localhost:8000', timeout=2)
+except Exception as e:
+    sys.exit(1)
+PY
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
