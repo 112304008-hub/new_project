@@ -1,121 +1,136 @@
-# 股價短期預測服務
+<div align="center">
 
-簡介  
-本專案是一個以 FastAPI 建置的輕量化股價短期預測系統。系統以歷史交易資料為基礎，提供模型推論服務與互動式前端，可對單一股票產生下一交易日上漲機率與二元標籤（漲 / 跌）。設計目標為可重現、容易整合與便於本地開發測試。
+# 📈 股價短期預測 / 批次建置服務 (new_project)
 
-重點功能
-- Web 前端：互動式頁面供使用者選擇股票、觸發預測並檢視推論與統計檢定結果。  
-- REST API：簡潔的 API（如 /api/draw）供自動化流程或外部系統呼叫。  
-- 多模型支援：內建隨機森林（rf）與邏輯迴歸（lr）兩種模型。  
-- 門檻最佳化：於驗證集上搜尋最佳分類閾值（以 F1 為準則）。  
-- 資料處理：載入 CSV、計算滯後與衍生特徵並執行預測流程。
+以 FastAPI 建構的股票短期特徵建置與預測服務：提供互動式網頁、REST API、批次背景任務、指數（S&P500 / Nasdaq-100 / 台股部分）成分自動擷取，以及模型推論。可本地快速開發，也可用 Docker 部署。
 
-目錄結構（關鍵）
-- main.py — FastAPI 應用程式入口  
-- stock.py — 資料前處理、模型訓練與 predict 函式  
-- template2.html — 前端頁面（互動 UI 與顯示）  
-- check_twelve.py — 若需，透過 Twelve Data 取得或更新歷史資料  
-- data/short_term_with_lag3.csv — 預期之歷史資料檔案
+</div>
 
-快速上手（Windows 範例）
-1. 取得原始碼
-```bash
-git clone <repository-url>
-cd new-project
+---
+
+## ✨ 核心功能
+| 類型 | 說明 |
+|------|------|
+| Web 前端 | `template2.html` 提供簡單抽籤 / 預測互動頁面 |
+| 預測 API | `/api/draw` 回傳模型推論（機率 + 標籤） |
+| 單 / 多股票資料建置 | `/api/build_symbol`, `/api/build_symbols` 建立指定 CSV |
+| 指數批次建置 | `/api/bulk_build_start?index=sp500` 等啟動背景任務 |
+| 背景任務狀態 | `/api/bulk_build_status?task_id=...` 查詢進度 |
+| 自動循環更新 | `/api/auto/start_symbol` 啟動每 X 分鐘更新某股票資料 |
+| 模型與閾值 | `models/` 內存放 `*_pipeline.pkl` 與對應 threshold |
+| 診斷資訊 | `/api/diagnostics` 與 `/api/latest_features` 等端點 |
+| 健康檢查 | `/health` 提供容器與依賴狀態回報 |
+
+---
+
+## 📂 目錄重點
 ```
-# 股價短期預測服務 (new_project)
+main.py            # FastAPI 入口與所有 API 定義
+stock.py           # 資料處理 / 建置 / 預測邏輯
+template2.html     # 前端頁面
+data/              # 產生的特徵 CSV、registry、*_last_update
+models/            # 已訓練模型與 threshold artifacts
+Dockerfile         # 精簡化 Python 3.11-slim 基底映像
+docker-compose.yml # 啟動服務 (web)；已移除過時 version 欄位
+requirements.txt   # 依賴版本（已修正 numpy pin）
+```
 
-本專案提供一個以 FastAPI 為基礎的股價短期預測系統，包含資料處理、模型訓練、批次建置與 REST API。設計重點為可在本地快速部署、方便測試與整合自動化批次處理。
+---
 
-主要功能
-- Web 前端：`template2.html` 提供簡單互動 UI，可觸發預測並檢視結果。  
-- REST API：以 `main.py` 為入口，提供單一/多檔 symbol 建置、啟動背景批次、查詢批次狀態等端點。  
-- 批次與自動化：支援以指數（如 S&P500）或逗號分隔的 symbols 字串啟動背景工作（參考 `fetch_sp500_github.py`, `start_first50.py`）。  
-- 模型支援：專案中包含訓練/載入與預測流程（目前以隨機森林與簡單分類器為主，實作位於 `stock.py`）。
-
-檔案重點說明
-- `main.py` — FastAPI 應用與批次管理（重要符號：`_fetch_index_tickers`, `bulk_build_start`, `bulk_build_status`, `DATA_DIR`, `BULK_TASKS`）。  
-- `stock.py` — 資料前處理、模型訓練與 `predict` 相關函式。  
-- `template2.html` — 前端頁面範本。  
-- `fetch_sp500_github.py`, `start_first50.py`, `start_next50.py` — 取得 S&P500 並啟動批次建置的範例腳本。  
-- `run_bulk_task_test.py`, `run_bulk_build.py` — 批次任務啟動與測試用腳本。  
-- `data/`、`models/` — CSV 與模型輸出目錄。
-
-快速上手（在開發機）
-1) 取得原始碼
-
+## 🚀 快速開始（本機開發，不使用 Docker）
 ```powershell
 git clone https://github.com/112304008-hub/new_project.git
 cd new-project
-```
-
-2) 建議建立虛擬環境並安裝套件（Windows 範例）
-
-```powershell
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+./.venv/Scripts/Activate.ps1
 pip install -r requirements.txt
-```
-
-若沒有 `requirements.txt` 或需手動安裝最小需求：
-
-```powershell
-pip install fastapi uvicorn scikit-learn pandas requests
-```
-
-3) 啟動 API（開發模式）
-
-```powershell
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
+開啟瀏覽器：http://localhost:8000
 
-打開瀏覽器前往 http://localhost:8000
+---
 
-常用 API 範例（請以 `main.py` 的實作為準）
-- 啟動批次（伺服器端）：`/api/bulk_build_start`（可傳 index=sp500 或 symbols=逗號分隔字串）。
-- 查詢批次狀態：`/api/bulk_build_status?task_id=<id>`。
-- 其他：`/api/build_symbol`、`/api/build_symbols`、`/api/draw`（詳細請參見 `main.py`）。
+## 🐳 使用 Docker / Compose
+先安裝 Docker Desktop (Windows) 或 Docker Engine (Linux)。
 
-執行範例腳本
-- 啟動前 50 檔的批次（本機測試）：
-
+建置映像：
 ```powershell
-python start_first50.py
+docker compose build
 ```
-
-- 從 GitHub raw 取得 S&P500 並啟動下一組：
-
+啟動服務：
 ```powershell
-python start_next50.py
-python fetch_sp500_github.py
+docker compose up -d
+```
+查看容器：
+```powershell
+docker ps
+```
+查看健康檢查 JSON：
+```powershell
+Invoke-WebRequest -Uri http://localhost:8000/health -UseBasicParsing | Select-Object -ExpandProperty Content
+```
+（若 STATUS 長時間停留在 `health: starting`，可檢查 Dockerfile HEALTHCHECK 或容器內部日誌。）
+
+停止與移除：
+```powershell
+docker compose down
 ```
 
-部署到另一台電腦 — 環境整理與步驟
-以下提供 Windows 與 Linux（Ubuntu）常見部署作法與檢查清單，含 systemd（Linux）與 NSSM（Windows）範例，方便你把服務常駐化。
+### Docker 健康檢查說明
+目前 HEALTHCHECK 每 30 秒呼叫 `/health`，成功條件為 HTTP 2xx 並且 JSON `status == "ok"`。
 
-共通前置
-- Python：建議使用 Python 3.10 或更新版本（與 `requirements.txt` 相容）。
-- 網路：確認部署主機可以存取第三方資料來源（如 GitHub raw、Yahoo Finance 等）。
-- 權限：確保 `data/` 與 `models/` 目錄有適當的讀寫權限。
+---
 
-Linux (Ubuntu) 建議步驟
-1. 安裝系統套件並建立虛擬環境
+## 🔍 主要 API 快速參考
+| Endpoint | 方法 | 說明 | 主要參數 |
+|----------|------|------|----------|
+| `/health` | GET | 簡易健康狀態 | - |
+| `/api/draw` | GET | 進行單次預測 | `model=rf|lr`, `symbol` (可選) |
+| `/api/build_symbol` | GET | 建構單一股票特徵 CSV | `symbol=` |
+| `/api/build_symbols` | GET | 多股票批次建構 | `symbols=2330,2317,AAPL` |
+| `/api/bulk_build_start` | GET | 啟動指數或自訂列表背景批次 | `index=sp500` 或 `symbols=`、`concurrency=` |
+| `/api/bulk_build_status` | GET | 查詢背景任務進度 | `task_id=` |
+| `/api/auto/start_symbol` | GET | 啟動某 symbol 週期更新 | `symbol=`, `interval=`(分鐘) |
+| `/api/auto/stop_symbol` | GET | 停止週期更新 | `symbol=` |
+| `/api/diagnostics` | GET | 回傳最新資料統計、模型清單 | `n_bins` (可選) |
+| `/api/latest_features` | GET | 最新一列特徵過濾 | `features` / `pattern` / `symbol` |
 
-```bash
-sudo apt update; sudo apt install -y python3-venv python3-pip
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+> 詳細行為與例外請參閱 `main.py`。
+
+---
+
+## 🧪 預測範例
+```powershell
+Invoke-WebRequest -Uri "http://localhost:8000/api/draw?model=rf" -UseBasicParsing | Select -Expand Content
+```
+或指定 symbol：
+```powershell
+Invoke-WebRequest -Uri "http://localhost:8000/api/draw?model=rf&symbol=AAPL" -UseBasicParsing | Select -Expand Content
 ```
 
-2. 測試啟動
+---
 
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
+## 🛠️ 常見問題 (FAQ)
+| 問題 | 可能原因 | 解法 |
+|------|----------|------|
+| Docker build 卡在 numpy / scipy | 版本不存在或無法抓取 wheel | 已 pin numpy=1.26.4；確認網路或換用官方 registry |
+| 容器 health 一直 starting | HEALTHCHECK Python -c 執行失敗或被殺 | 進容器 `docker logs <container>`；簡化 HEALTHCHECK 腳本 |
+| `/api/draw` 回傳模型未準備 | `models/` 缺少 `*_pipeline.pkl` 或 threshold | 確認訓練流程已產出並掛載 `models/` 目錄 |
+| `/api/build_symbol` 失敗 | 無法連到 Yahoo Finance 或 symbol 無效 | 測試連線；改用其他 symbol；稍後再試 |
+| 批次任務 progress 不動 | 網路取資料慢或遭 rate-limit | 降低 concurrency；分批執行 |
 
-3. 建立 systemd 服務單元（範例：`/etc/systemd/system/newproject.service`）
+---
 
+## 📊 健康與可觀察性
+最輕量的存活檢查：`/health`
+更深入：`/api/diagnostics`（含最新資料行、模型清單、特徵統計）。
+背景任務監控：輪詢 `/api/bulk_build_status?task_id=...`。
+
+---
+
+## 🧱 部署建議（非容器）
+### Linux (systemd)
+建立服務單元：
 ```
 [Unit]
 Description=NewProject FastAPI
@@ -132,57 +147,47 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
-啟用並啟動：
-
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable newproject
 sudo systemctl start newproject
-sudo systemctl status newproject
 ```
 
-4. （可選）設定 Nginx 反向代理與 TLS，或使用 Cloud 反向代理
+### Windows (NSSM) 重點欄位
+Path: `C:\path\to\new-project\.venv\Scripts\python.exe`  
+Arguments: `-m uvicorn main:app --host 0.0.0.0 --port 8000`  
+Start directory: `C:\path\to\new-project`
 
-Windows 建議步驟
-1. 建立虛擬環境並安裝套件（PowerShell）
+---
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
+## 🔐 安全 / 上線注意事項
+- 若公開：加上反向代理（Nginx / Caddy）+ TLS。
+- 加入基本認證或 API key（可在 FastAPI 中加一個 dependency）。
+- 限制速率（可用中介層或外部 API Gateway）。
+- 排程清理過舊 CSV / log。
 
-2. 測試啟動
+---
 
-```powershell
-.venv\Scripts\Activate.ps1
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
+## 🧩 後續可能增強
+- Multi-stage Docker build（壓縮映像體積）
+- /metrics (Prometheus) 暴露
+- 模型版本管理（e.g. MLflow 或自訂 manifest）
+- 前端 UI 加入批次進度輪詢與圖表
 
-3. 將 uvicorn 註冊為 Windows Service（選項：NSSM）
-- 下載 NSSM（https://nssm.cc/）並將 `uvicorn` 指向 Python venv 的可執行檔。
-- 範例：
-	- Path: C:\path\to\new-project\.venv\Scripts\python.exe
-	- Arguments: -m uvicorn main:app --host 0.0.0.0 --port 8000
-	- Start directory: C:\path\to\new-project
+---
 
-4. 也可用 Task Scheduler 或建立 PowerShell 腳本搭配 NSSM / 服務註冊。
+## 📄 授權
+MIT（若新增 LICENSE 檔請同步更新此段）。
 
-資料與權限
-- 確認 `data/`、`models/` 可寫。應用程式會將輸出寫入 `data/` 與 `models/`（請參考 `main.py` 中 `DATA_DIR` 常數）。
+---
 
-測試與驗收清單
-- Python 與套件安裝完成（pip list 或 pip freeze）。
-- Uvicorn 成功啟動並回應根目錄（curl http://localhost:8000/ 或在 Windows 用 Invoke-WebRequest）。
-- 執行範例批次：`python start_first50.py` 並觀察是否回傳 task id 與狀態。若有 `run_bulk_task_test.py`，可用它做完整輪詢測試。
+## 🙋 支援
+遇到問題可：
+1. 檢查日誌：`docker logs <container>`
+2. 驗證健康：`/health`
+3. 確認資料：`data/` 內是否有對應 CSV
+4. 確認模型：`models/` 內是否有 `*_pipeline.pkl`
 
-進階建議（可選）
-- 容器化：若需要更穩定的部署，建議用 Docker 並用 docker-compose 或 Kubernetes 管理。  
-- 日誌：串接 systemd 日誌（Linux）或 Windows 事件查看器，並定期清理 `data/` 與 `models/` 的舊檔。  
-- 安全：若暴露 API 到公網，務必加入基礎認證或反向代理層的限制與 TLS。
+---
 
-我已經更新 README。接下來我會：
-1. 把 todo id=2 標示為已完成，並把 id=3 標示為 in-progress，檢查檔案寫入成功後回報簡短摘要與下一步建議。
-
-授權
-本專案採 MIT 授權。請參閱 `LICENSE`（若有）以取得詳細條款。
+> 本 README 已整合本地、Docker、健康檢查與常見問題，方便快速上線與維運。

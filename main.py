@@ -765,6 +765,40 @@ def latest_features(features: str | None = None, pattern: str | None = None, fil
 
     return {"source": str(csv_path.resolve()), "selected_columns": selected, "latest": latest_selected}
 
+# === 健康檢查 endpoint ===
+@app.get('/health')
+def health():
+    """Lightweight health check used by container HEALTHCHECK.
+
+    Returns JSON with:
+      - status: always "ok" if reachable
+      - versions: selected library versions
+      - models_ready: whether any model pipeline files exist
+      - data_ready: whether main DATA CSV exists and is non-empty
+    Avoids heavy operations for quick liveness/probing.
+    """
+    try:
+        models_ready = False
+        model_files = []
+        if MODELS_DIR.exists():
+            model_files = [p.name for p in MODELS_DIR.glob('*_pipeline.pkl')]
+            models_ready = len(model_files) > 0
+        data_ready = DATA.exists() and DATA.stat().st_size > 0
+        return {
+            "status": "ok",
+            "models_ready": models_ready,
+            "model_files": model_files[:5],  # limit list size
+            "data_ready": data_ready,
+            "versions": {
+                "python": f"{os.sys.version_info.major}.{os.sys.version_info.minor}.{os.sys.version_info.micro}",
+                "pandas": getattr(pd, '__version__', None),
+                "numpy": getattr(np, '__version__', None),
+                "scipy": getattr(stats, '__version__', None) if hasattr(stats, '__version__') else None,
+            }
+        }
+    except Exception as e:
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
 # === 執行啟動 ===
 @app.on_event('startup')
 async def _rehydrate_auto_registry():

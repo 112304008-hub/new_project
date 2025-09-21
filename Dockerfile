@@ -15,14 +15,8 @@ COPY . /app
 
 EXPOSE 8000
 
-# Lightweight healthcheck using stdlib (avoids curl dependency)
+# Simplified single-line healthcheck: success if HTTP 200
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD python - <<'PY' || exit 1
-import urllib.request, sys
-try:
-    urllib.request.urlopen('http://localhost:8000', timeout=2)
-except Exception as e:
-    sys.exit(1)
-PY
+    CMD python -c "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=2).status==200 else 1)" || exit 1
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

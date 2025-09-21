@@ -10,5 +10,5 @@ services:
       - ./models:/app/models:rw
     environment:
       - PYTHONUNBUFFERED=1
-  restart: unless-stopped
-  # Add health status passthrough if needed later (depends on Docker/compose version)
+    restart: unless-stopped
+    # Add health status passthrough if needed later (depends on Docker/compose version)
