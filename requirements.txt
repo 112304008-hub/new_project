@@ -10,3 +10,4 @@ requests==2.31.0
 scipy==1.11.1
 statsmodels==0.14.0
 pytest==7.4.0
+prometheus-client==0.20.0

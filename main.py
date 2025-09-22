@@ -1,7 +1,9 @@
 # main.py — Main application script for the FastAPI application
 import os
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+import time as _time
+import logging
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from stock import predict, MODELS_DIR
@@ -19,7 +21,100 @@ from scipy import stats
 import statsmodels.tsa.stattools as tsstat
 import re
 
-app = FastAPI(title="股價之神")
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+
+APP_GIT_SHA = os.getenv("APP_GIT_SHA", "UNKNOWN")
+APP_BUILD_TIME = os.getenv("APP_BUILD_TIME", "UNKNOWN")
+API_KEY = os.getenv("API_KEY")  # optional
+
+# Basic key=value logging format for easy ingestion
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="ts=%(asctime)s level=%(levelname)s msg=%(message)s module=%(module)s",
+)
+logger = logging.getLogger("app")
+
+# Prometheus metrics
+HTTP_REQ_COUNT = Counter(
+    "app_http_requests_total", "HTTP request count", ["method", "path", "status"]
+)
+HTTP_REQ_LATENCY = Histogram(
+    "app_http_request_duration_seconds", "HTTP request latency", ["method", "path"]
+)
+BACKGROUND_TASKS_GAUGE = Gauge(
+    "app_background_tasks", "Number of running background tasks"
+)
+MODELS_READY_GAUGE = Gauge(
+    "app_models_ready", "1 if at least one model pipeline file present else 0"
+)
+DATA_READY_GAUGE = Gauge(
+    "app_data_ready", "1 if main data CSV present and non-empty else 0"
+)
+
+app = FastAPI(title="股價之神", version="1.0")
+
+
+def _update_gauges():
+    try:
+        models_ready = MODELS_DIR.exists() and any(MODELS_DIR.glob('*_pipeline.pkl'))
+        MODELS_READY_GAUGE.set(1 if models_ready else 0)
+        data_ready = DATA.exists() and DATA.stat().st_size > 0
+        DATA_READY_GAUGE.set(1 if data_ready else 0)
+        # background bulk + symbol tasks
+        running_tasks = sum(1 for t in BULK_TASKS.values() if isinstance(t, dict) and t.get('status') == 'running')
+        running_tasks += sum(1 for t in SYMBOL_TASKS.values() if not t.done())
+        BACKGROUND_TASKS_GAUGE.set(running_tasks)
+    except Exception as e:
+        logger.debug(f"gauge update failed: {e}")
+
+
+@app.middleware("http")
+async def metrics_and_logging_middleware(request: Request, call_next):
+    start = _time.perf_counter()
+    req_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    # simple rate limit (memory) excluding safe paths
+    path = request.url.path
+    rate_exempt = path.startswith('/health') or path.startswith('/metrics') or path.startswith('/version') or path.startswith('/static') or path == '/'
+    client_ip = request.client.host if request.client else "-"
+    if not hasattr(app.state, 'rate_bucket'):
+        app.state.rate_bucket = {}
+    bucket = app.state.rate_bucket
+    now = _time.time()
+    window = 60
+    limit = int(os.getenv("RATE_LIMIT_PER_MIN", "120"))
+    key = f"{client_ip}" if not rate_exempt else None
+    if key:
+        rec = bucket.get(key)
+        if not rec or now - rec['ts'] > window:
+            rec = {'ts': now, 'count': 0}
+        rec['count'] += 1
+        bucket[key] = rec
+        if rec['count'] > limit:
+            return JSONResponse({"error": "rate limit exceeded"}, status_code=429, headers={"x-request-id": req_id})
+
+    # API key check (only protect /api/* endpoints unless exempt list)
+    if API_KEY and path.startswith('/api/'):
+        provided = request.headers.get('x-api-key')
+        if provided != API_KEY:
+            return JSONResponse({"error": "unauthorized"}, status_code=401, headers={"x-request-id": req_id})
+
+    try:
+        response: Response = await call_next(request)
+    except Exception as e:
+        logger.exception(f"request failed req_id={req_id} path={path} error={e}")
+        response = JSONResponse({"error": "internal error"}, status_code=500)
+    duration = _time.perf_counter() - start
+    status = response.status_code
+    # record metrics (path collapsed for very dynamic routes if needed)
+    label_path = path if len(path) < 64 else path[:60] + '...'
+    if not path.startswith('/static'):
+        HTTP_REQ_COUNT.labels(request.method, label_path, str(status)).inc()
+        HTTP_REQ_LATENCY.labels(request.method, label_path).observe(duration)
+    response.headers['x-request-id'] = req_id
+    logger.info(
+        f"req_id={req_id} method={request.method} path={path} status={status} ms={duration*1000:.2f} ip={client_ip} ua=\"{request.headers.get('user-agent','')}\""
+    )
+    return response
 
 # === 路徑設定 ===
 ROOT = Path(__file__).parent
@@ -794,10 +889,33 @@ def health():
                 "pandas": getattr(pd, '__version__', None),
                 "numpy": getattr(np, '__version__', None),
                 "scipy": getattr(stats, '__version__', None) if hasattr(stats, '__version__') else None,
+                "app_git_sha": APP_GIT_SHA,
+                "build_time": APP_BUILD_TIME,
             }
         }
     except Exception as e:
         return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+
+@app.get('/version')
+def version():
+    """Return build / version metadata (safe for public)."""
+    return {
+        "git_sha": APP_GIT_SHA,
+        "build_time": APP_BUILD_TIME,
+        "python": f"{os.sys.version_info.major}.{os.sys.version_info.minor}.{os.sys.version_info.micro}",
+        "fastapi": getattr(FastAPI, '__version__', 'n/a'),
+        "pandas": getattr(pd, '__version__', None),
+        "numpy": getattr(np, '__version__', None),
+    }
+
+
+@app.get('/metrics')
+def metrics():
+    """Prometheus metrics endpoint."""
+    _update_gauges()
+    data = generate_latest()  # bytes
+    return Response(content=data, media_type=CONTENT_TYPE_LATEST)
 
 # === 執行啟動 ===
 @app.on_event('startup')

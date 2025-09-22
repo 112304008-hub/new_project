@@ -1,7 +1,13 @@
 FROM python:3.11-slim
 
+# Build metadata args (can be overridden at build time)
+ARG APP_GIT_SHA=UNKNOWN
+ARG APP_BUILD_TIME=UNKNOWN
+
 # Minimal image: rely on manylinux wheels (no apt layer to avoid blocked mirrors)
-ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+    APP_GIT_SHA=${APP_GIT_SHA} \
+    APP_BUILD_TIME=${APP_BUILD_TIME}
 
 WORKDIR /app
 

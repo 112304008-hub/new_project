@@ -146,48 +146,306 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 ```
+<div align="center">
 
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable newproject
-sudo systemctl start newproject
+# 📈 股價短期預測 / 批次建置服務 (new_project)
+
+FastAPI 驅動的短期股價特徵建置與推論平台：整合資料抓取、批次建置、自動更新、模型推論、監控與基本安全控制，可快速於本地或雲端部署並長期維運。
+
+</div>
+
+---
+
+## 目錄 (Table of Contents)
+1. 概述 (Overview)
+2. 核心能力 (Key Features)
+3. 系統架構 (Architecture)
+4. 目錄結構 (Repository Layout)
+5. 快速開始 (Quick Start)
+6. 使用 Docker 與部署模式 (Deployment Modes)
+7. 組態與環境變數 (Configuration / Env Vars)
+8. API 一覽 (API Matrix)
+9. 資料與模型生命週期 (Data & Model Lifecycle)
+10. 背景任務與排程 (Background Tasks)
+11. 觀測性 / 指標 / 日誌 (Observability)
+12. 安全與存取控制 (Security)
+13. 效能與調校 (Performance Tuning)
+14. 部署指引（Systemd / Nginx / 反向代理）
+15. 災難復原與備份 (DR & Backup)
+16. 疑難排解 (Troubleshooting)
+17. Roadmap / 未來方向
+18. 授權與支援 (License & Support)
+
+---
+
+## 1. 概述 (Overview)
+本專案提供：
+- 以歷史資料 + 衍生特徵（包含滯後欄位）進行短期方向機率推論。
+- 自動化批次抓取 / 建置（指數成分、指定多檔），並可背景執行與輪詢進度。
+- 模型輸出與分類閾值（threshold）載入後僅供推論，避免在佈署容器內做重量級訓練。
+- 健康監控、Prometheus 指標、速率限制、可選 API Key、安全最佳實務基礎。
+
+適用場景：量化研究 PoC、內部工具、輕量服務對外試營運。
+
+---
+
+## 2. 核心能力 (Key Features)
+| 類別 | 說明 | 成熟度 |
+|------|------|--------|
+| 預測 API | `/api/draw` 提供機率與標籤 | 穩定 |
+| 特徵資料建置 | 單檔 / 多檔 / 指數批次 | 穩定 |
+| 背景任務 | Bulk build / 自動更新 Symbol | 穩定 |
+| 自動再啟動註冊 | 透過 registry 檔案重啟後恢復 | 基礎 |
+| 健康檢查 | `/health` + Docker HEALTHCHECK | 穩定 |
+| 觀測性 | `/metrics` Prometheus 指標 + `/version` | 穩定 |
+| 安全 | 速率限制 + API Key (可選) | 基礎 |
+| 日誌 | key=value 統一格式 | 基礎 |
+| 模型管理 | 基於檔案 (pipeline + threshold) | 基礎 |
+
+---
+
+## 3. 系統架構 (Architecture)
+邏輯分層：
+```
+┌────────────────────────────────────┐
+│          Client / Browser          │ -> 使用 template2.html 或 API 呼叫
+└────────────────────────────────────┘
+                │ HTTP
+┌────────────────────────────────────┐
+│            FastAPI (main.py)       │
+│  - 路由與輸入驗證                  │
+│  - 中介層：日誌 / 速率限制 / API Key │
+│  - 背景任務排程 (async tasks)       │
+└────────────────────────────────────┘
+                │
+┌────────────────────────────────────┐
+│        特徵 / 模型工具 (stock.py)  │
+│  - 資料抓取 (Yahoo Finance)         │
+│  - 特徵建置                         │
+│  - 模型載入 / 預測                  │
+└────────────────────────────────────┘
+                │
+┌────────────────────────────────────┐
+│  持久化層 (data/, models/, registry) │
+│  - CSV / last_update / auto registry │
+│  - pipeline.pkl / threshold.pkl      │
+└────────────────────────────────────┘
 ```
 
-### Windows (NSSM) 重點欄位
-Path: `C:\path\to\new-project\.venv\Scripts\python.exe`  
-Arguments: `-m uvicorn main:app --host 0.0.0.0 --port 8000`  
-Start directory: `C:\path\to\new-project`
+---
+
+## 4. 目錄結構 (Repository Layout)
+```
+main.py               # FastAPI 入口、API、middleware、/metrics /version /health
+stock.py              # 資料 / 模型工具與預測函式
+template2.html        # 前端頁面 (簡易互動 UI)
+data/                 # 資料輸出與狀態檔 (符號 CSV, *_last_update, registry)
+models/               # 模型與 threshold artifacts
+Dockerfile            # 部署映像：精簡 + 健康檢查
+docker-compose.yml    # 開發 / 單機部署服務定義
+requirements.txt      # 依賴 (含 prometheus-client)
+README.md             # 說明文件（本檔）
+```
 
 ---
 
-## 🔐 安全 / 上線注意事項
-- 若公開：加上反向代理（Nginx / Caddy）+ TLS。
-- 加入基本認證或 API key（可在 FastAPI 中加一個 dependency）。
-- 限制速率（可用中介層或外部 API Gateway）。
-- 排程清理過舊 CSV / log。
+## 5. 快速開始 (Quick Start - Dev w/out Docker)
+```powershell
+git clone https://github.com/112304008-hub/new_project.git
+cd new-project
+python -m venv .venv
+./.venv/Scripts/Activate.ps1
+pip install -r requirements.txt
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+瀏覽器開啟：http://localhost:8000
 
 ---
 
-## 🧩 後續可能增強
-- Multi-stage Docker build（壓縮映像體積）
-- /metrics (Prometheus) 暴露
-- 模型版本管理（e.g. MLflow 或自訂 manifest）
-- 前端 UI 加入批次進度輪詢與圖表
+## 6. 部署模式 (Deployment Modes)
+| 模式 | 說明 | 適合 | 備註 |
+|------|------|------|------|
+| 本地直接執行 | venv + uvicorn | 開發 | 變更快速, 無隔離 |
+| Docker 單容器 | docker compose | 小型上線 | 持久層使用 bind mount |
+| 多主機（手動） | 手動分發 image | 內部測試 | 可 docker save / load |
+| Registry 發佈 | push 到 Docker Hub / ECR | 穩定長期 | 建議加 CI/CD |
+| K8s (未內建範例) | Deployment + Service + Ingress | 水平擴展 | 需加共享儲存 & 分布式限流 |
 
 ---
 
-## 📄 授權
-MIT（若新增 LICENSE 檔請同步更新此段）。
+## 7. 組態與環境變數 (Configuration)
+| 變數 | 功能 | 預設 | 備註 |
+|------|------|------|------|
+| API_KEY | 啟用 API Key 驗證 `/api/*` | 無 (停用) | Header: x-api-key |
+| RATE_LIMIT_PER_MIN | 每 IP 每分鐘請求上限 | 120 | 不含 /health /metrics /version /static / |
+| LOG_LEVEL | 日誌層級 | INFO | DEBUG / WARNING / ERROR |
+| APP_GIT_SHA | Build 時注入 commit | UNKNOWN | Docker ARG 傳入 |
+| APP_BUILD_TIME | Build UTC 時間 | UNKNOWN | Docker ARG 傳入 |
+
+版本資訊建置（PowerShell）：
+```powershell
+$sha = (git rev-parse --short HEAD)
+$ts = (Get-Date -Format o)
+docker build --build-arg APP_GIT_SHA=$sha --build-arg APP_BUILD_TIME=$ts -t new-project-web:$sha .
+```
 
 ---
 
-## 🙋 支援
-遇到問題可：
-1. 檢查日誌：`docker logs <container>`
-2. 驗證健康：`/health`
-3. 確認資料：`data/` 內是否有對應 CSV
-4. 確認模型：`models/` 內是否有 `*_pipeline.pkl`
+## 8. API 一覽 (API Matrix)
+| Endpoint | Method | 描述 | 重要參數 | 保護 (需 API Key?) |
+|----------|--------|------|----------|-------------------|
+| `/` | GET | 前端頁面 | - | 否 |
+| `/health` | GET | 健康狀態 | - | 否 |
+| `/version` | GET | Build / 版本資訊 | - | 否 |
+| `/metrics` | GET | Prometheus 指標 | - | 否 |
+| `/api/draw` | GET | 單次推論 | model, symbol? | 是 (若啟用) |
+| `/api/build_symbol` | GET | 建構單檔 | symbol | 是 |
+| `/api/build_symbols` | GET | 建構多檔 | symbols CSV | 是 |
+| `/api/bulk_build_start` | GET | 啟動批次 | index / symbols / concurrency | 是 |
+| `/api/bulk_build_status` | GET | 批次進度 | task_id | 是 |
+| `/api/auto/start_symbol` | GET | 自動更新 symbol | symbol, interval | 是 |
+| `/api/auto/stop_symbol` | GET | 停止自動 | symbol | 是 |
+| `/api/diagnostics` | GET | 診斷統計 | n_bins | 是 |
+| `/api/latest_features` | GET | 最新特徵 | features / pattern / symbol | 是 |
 
 ---
 
-> 本 README 已整合本地、Docker、健康檢查與常見問題，方便快速上線與維運。
+## 9. 資料與模型生命週期 (Data & Model Lifecycle)
+| 階段 | 動作 | 來源 / 產出 | 說明 |
+|------|------|-------------|------|
+| 抓取 | Yahoo Finance / Wikipedia | 原始價量 / 指數成分 | 視網路與頻率限制 |
+| 特徵建置 | stock.py `_build_from_yfinance` | `*_short_term_with_lag3.csv` | 產生滯後與統計欄位 |
+| 模型訓練 (外部) | (不在容器內) | `*_pipeline.pkl` + `*_threshold.pkl` | 推薦離線訓練後掛載 |
+| 推論 | `/api/draw` | JSON 結果 | 輕量、無 state |
+| 保留 / 清理 | data/ models/ | 老舊 CSV/模型 | 排程清理避免膨脹 |
+
+---
+
+## 10. 背景任務與排程 (Background Tasks)
+機制：FastAPI 啟動後讀取 auto registry → 啟動對應 symbol loop。
+避免爆量：限制同時 concurrency；可手動停用 `/api/auto/stop_symbol`。
+建議：大量 symbol 背景更新時監控 CPU / 網路頻寬。
+
+---
+
+## 11. 觀測性 (Observability)
+| 類別 | 工具 / 端點 | 指標 |
+|------|-------------|------|
+| 健康 | `/health` | status / models_ready / data_ready |
+| 版本 | `/version` | git_sha / build_time / package versions |
+| 指標 | `/metrics` | app_http_requests_total / _duration_seconds / app_models_ready / app_data_ready / app_background_tasks |
+| 日誌 | STDOUT | key=value：req_id / method / path / status / ms |
+
+Prometheus 抓取設定：
+```
+scrape_configs:
+  - job_name: new_project
+    static_configs:
+      - targets: ['host:8000']
+```
+
+告警參考：
+| 指標 | 規則 | 意義 |
+|------|------|------|
+| app_http_request_duration_seconds_bucket | p95 > 1s for 5m | 延遲異常 |
+| app_http_requests_total{status=~"5.."} / sum(all) | >2% | 失敗率上升 |
+| app_models_ready == 0 | 任何時間 | 模型遺失 |
+| app_background_tasks 高於基線 | 持續 10m | 堆積 |
+
+---
+
+## 12. 安全與存取控制 (Security)
+現有：API Key（header: x-api-key）、速率限制 (in-memory)、基本 logging。
+建議進階：
+| 面向 | 建議 |
+|------|------|
+| 傳輸 | 加 TLS (Nginx / Caddy / Cloudflare) |
+| 驗證 | 分層 scope / JWT（視未來需求） |
+| 授權 | 僅對 retrain / destructive API 加更嚴保護 |
+| 限流 | 多副本時改 Redis / external rate limiter |
+| 供應鏈 | pip hash / 週期性漏洞掃描 (trivy) |
+
+---
+
+## 13. 效能與調校 (Performance)
+| 項目 | 策略 |
+|------|------|
+| 冷啟動 | 精簡 base image + 預載模型於首次呼叫 |
+| 預測延遲 | 模型載入快（joblib pickle），可加簡單 LRU cache |
+| I/O | 大量 symbol 時避免同時 burst；控制 concurrency |
+| 記憶體 | 監控 RSS 指標（/metrics process_*） |
+| 映像大小 | 可改 multi-stage 或使用 `python:3.11-slim` + 移除多餘檔案 |
+
+---
+
+## 14. 部署指引摘要
+### Docker Compose
+```bash
+docker compose build \
+  --build-arg APP_GIT_SHA=$(git rev-parse --short HEAD) \
+  --build-arg APP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+API_KEY=YourKey RATE_LIMIT_PER_MIN=200 docker compose up -d
+```
+
+### Systemd (Linux)
+見先前範本；確保 `Environment="API_KEY=YourKey"` 加入。
+
+### Nginx 反向代理
+```
+server {
+  listen 443 ssl;
+  server_name example.com;
+  location / { proxy_pass http://127.0.0.1:8000; }
+}
+```
+
+---
+
+## 15. 災難復原與備份 (DR & Backup)
+| 資產 | 重要性 | 建議備份頻率 | 備註 |
+|------|--------|--------------|------|
+| models/ | 高 | 每模型更新 | 可加版本號副檔名 |
+| data/*.csv | 中 | 每日 / 產生後 | 可壓縮存放 object storage |
+| auto_registry.json | 中 | 每次變動 | 復原自動任務狀態 |
+| Docker image | 中 | 每次 build | Tag 含 SHA |
+
+恢復流程：拉回 image → 還原 models/ → 還原 data/ → 啟動 → 驗證 `/health`。
+
+---
+
+## 16. 疑難排解 (Troubleshooting)
+| 症狀 | 排查步驟 | 修復 |
+|------|----------|------|
+| `/health` 失敗 | docker logs / 檢查依賴 | 重建或確認套件版本 |
+| 模型未準備 | `/health` models_ready=0 | 確認掛載 models/ 與檔名格式 *_pipeline.pkl |
+| 預測慢 | 查看 latency histogram | 減少同時 bulk build / 增 cache |
+| 記憶體攀升 | process_resident_memory_bytes | 降低自動更新數量 / 增容器限制 |
+| 429 Too Many Requests | 日誌計數 | 調整 RATE_LIMIT_PER_MIN 或導入 API Key 分流 |
+
+---
+
+## 17. Roadmap / 未來方向
+- 模型版本管理 (MLflow or manifest)
+- 多語系 / 英文 README 分版
+- Retrain API（需角色 / scope）
+- WebSocket 進度推播
+- OpenTelemetry Tracing
+- Redis 共享 rate limit / 任務隊列
+
+---
+
+## 18. 授權與支援 (License & Support)
+授權：MIT（若新增 `LICENSE` 請同步更新本段）。
+
+支援步驟：
+1. `docker logs <container>` 收集錯誤
+2. `curl /health` / `curl /version`
+3. `curl /metrics | grep app_http_requests_total`
+4. 確認 models/ 與 data/ 是否掛載
+5. 檔案/環境變數差異清單
+
+回報問題時建議附：FastAPI 版本、git SHA、執行環境（Docker / OS）、錯誤片段。
+
+---
+
+> 本文件已提供開發、部署、維運、監控與安全所需之完整參考。若需英文版或進一步自動化 (CI/CD / Kubernetes) 可再提出需求。
