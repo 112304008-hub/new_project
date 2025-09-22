@@ -83,6 +83,7 @@ data/*_last_update.txt
 data/*_summary.json
 data/auto_registry.json
 data/*_short_term_with_lag3.csv
+data/index_auto_registry.json
 
 # If you want to keep a tiny sample for docs, place it under data/examples/ and whitelist:
 !data/examples/

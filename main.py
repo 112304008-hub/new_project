@@ -236,9 +236,12 @@ def _ensure_symbol_csv(symbol: str) -> Path:
 
 # manage per-symbol auto tasks
 SYMBOL_TASKS: Dict[str, asyncio.Task] = {}
+# Index-wide auto update tasks (e.g. sp500, nasdaq100) so we don't spawn hundreds of per-symbol coroutines.
+INDEX_TASKS: Dict[str, asyncio.Task] = {}
 
 # persistent registry file for auto symbol loops (symbol -> interval_min)
 AUTO_REG_FILE = DATA.parent / "auto_registry.json"
+INDEX_AUTO_REG_FILE = DATA.parent / "index_auto_registry.json"
 
 def _load_auto_registry() -> dict:
     try:
@@ -256,6 +259,22 @@ def _save_auto_registry(reg: dict):
     except Exception as e:
         print(f"[warning] 無法寫入 auto registry: {e}")
 
+def _load_index_auto_registry() -> dict:
+    try:
+        if INDEX_AUTO_REG_FILE.exists():
+            with INDEX_AUTO_REG_FILE.open('r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+def _save_index_auto_registry(reg: dict):
+    try:
+        with INDEX_AUTO_REG_FILE.open('w', encoding='utf-8') as f:
+            json.dump(reg, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[warning] 無法寫入 index auto registry: {e}")
+
 async def _symbol_loop(symbol: str, interval_min: int):
     print(f"[symbol auto] 啟動自動更新：{symbol} every {interval_min} min")
     while True:
@@ -271,6 +290,52 @@ async def _symbol_loop(symbol: str, interval_min: int):
                 pass
         except Exception as e:
             print(f"[symbol auto] 更新 {symbol} 失敗: {e}")
+        await asyncio.sleep(max(1, int(interval_min)) * 60)
+
+async def _index_loop(index: str, interval_min: int, concurrency: int = 4):
+    """Loop that (re)builds all symbols of an index every interval minutes.
+
+    Strategy: fetch full list once at start (retry inside loop if empty), then each cycle:
+      - iterate symbols in chunks with limited concurrency
+      - build CSV if missing or stale (we rebuild unconditionally to keep recent data)
+    This avoids spawning one persistent task per symbol and centralizes scheduling.
+    """
+    print(f"[index auto] 啟動指數自動更新：{index} every {interval_min} min (concurrency={concurrency})")
+    syms: list[str] = []
+    while True:
+        try:
+            if not syms:
+                try:
+                    # reuse _fetch_index_tickers for supported indices
+                    syms = _fetch_index_tickers(index)
+                    syms = list(dict.fromkeys([s.upper() for s in syms]))
+                except Exception as e:
+                    print(f"[index auto] 取得指數 {index} 成分失敗: {e}; 5 分鐘後重試")
+                    await asyncio.sleep(300)
+                    continue
+            sem = asyncio.Semaphore(max(1, int(concurrency)))
+            async def _build_one(sym: str):
+                async with sem:
+                    p = _symbol_csv_path(sym)
+                    try:
+                        await asyncio.to_thread(lambda: (_ensure_yf(), _build_from_yfinance(symbol=sym, out_csv=p)))
+                        ts_path = p.parent / f"{sym}_last_update.txt"
+                        from datetime import datetime
+                        try:
+                            with ts_path.open('w', encoding='utf-8') as f:
+                                f.write(datetime.now().isoformat())
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        print(f"[index auto] 更新 {sym} 失敗: {e}")
+            tasks = [asyncio.create_task(_build_one(s)) for s in syms]
+            await asyncio.gather(*tasks)
+        except asyncio.CancelledError:
+            print(f"[index auto] 指數 {index} loop 已取消")
+            raise
+        except Exception as e:
+            print(f"[index auto] 迴圈錯誤：{e}")
+        # sleep interval
         await asyncio.sleep(max(1, int(interval_min)) * 60)
 
 
@@ -465,6 +530,48 @@ async def auto_stop_symbol(symbol: str):
 def auto_list_registry():
     reg = _load_auto_registry()
     return {"ok": True, "registry": reg}
+
+@app.get('/api/auto/start_index')
+async def auto_start_index(index: str, interval: int = 5, concurrency: int = 4):
+    """Start an auto-update loop for an entire index (sp500 / nasdaq100 / twse).
+    This runs a single loop instead of hundreds of symbol loops.
+    NOTE: Running both per-symbol loops and index loop for overlapping symbols may cause extra load.
+    """
+    if not index:
+        return JSONResponse({"ok": False, "error": "請提供 index 參數"}, status_code=400)
+    ix = index.lower()
+    if ix in INDEX_TASKS and not INDEX_TASKS[ix].done():
+        return {"ok": True, "status": "already running", "index": ix}
+    loop = asyncio.get_running_loop()
+    task = loop.create_task(_index_loop(ix, interval, concurrency))
+    INDEX_TASKS[ix] = task
+    reg = _load_index_auto_registry()
+    reg[ix] = {"interval": int(interval), "concurrency": int(concurrency)}
+    _save_index_auto_registry(reg)
+    return {"ok": True, "status": "started", "index": ix, "interval_min": interval, "concurrency": concurrency}
+
+@app.get('/api/auto/stop_index')
+def auto_stop_index(index: str):
+    if not index:
+        return JSONResponse({"ok": False, "error": "請提供 index 參數"}, status_code=400)
+    ix = index.lower()
+    t = INDEX_TASKS.get(ix)
+    if t and not t.done():
+        t.cancel()
+        INDEX_TASKS.pop(ix, None)
+        reg = _load_index_auto_registry()
+        if ix in reg:
+            reg.pop(ix, None)
+            _save_index_auto_registry(reg)
+        return {"ok": True, "status": "stopped", "index": ix}
+    return {"ok": False, "error": "not running", "index": ix}
+
+@app.get('/api/auto/list_index')
+def auto_list_index():
+    """List active index auto loops (in-memory + registry)."""
+    reg = _load_index_auto_registry()
+    running = [k for k, v in INDEX_TASKS.items() if not v.done()]
+    return {"ok": True, "registry": reg, "running": running}
 
 
 @app.get('/api/auto/start_many')
@@ -924,7 +1031,7 @@ async def _rehydrate_auto_registry():
     try:
         reg = _load_auto_registry()
         if reg:
-            print(f"[startup] rehydrating auto registry: {reg}")
+            print(f"[startup] rehydrating auto symbol registry: {reg}")
             loop = asyncio.get_event_loop()
             for sym, interval in reg.items():
                 try:
@@ -936,6 +1043,24 @@ async def _rehydrate_auto_registry():
                     print(f"[startup] failed to start auto for {sym}: {e}")
     except Exception as e:
         print(f"[startup] failed to load auto registry: {e}")
+    # Rehydrate index loops
+    try:
+        ireg = _load_index_auto_registry()
+        if ireg:
+            print(f"[startup] rehydrating index auto registry: {ireg}")
+            loop = asyncio.get_event_loop()
+            for ix, cfg in ireg.items():
+                if ix in INDEX_TASKS and not INDEX_TASKS[ix].done():
+                    continue
+                try:
+                    interval = int(cfg.get('interval', 5))
+                    concurrency = int(cfg.get('concurrency', 4))
+                    task = loop.create_task(_index_loop(ix, interval, concurrency))
+                    INDEX_TASKS[ix] = task
+                except Exception as e:
+                    print(f"[startup] failed to start index auto for {ix}: {e}")
+    except Exception as e:
+        print(f"[startup] failed to load index auto registry: {e}")
 
 if __name__ == "__main__":
     import uvicorn
