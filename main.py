@@ -301,7 +301,7 @@ async def _index_loop(index: str, interval_min: int, concurrency: int = 4):
     This avoids spawning one persistent task per symbol and centralizes scheduling.
     """
     print(f"[index auto] 啟動指數自動更新：{index} every {interval_min} min (concurrency={concurrency})")
-    syms: list[str] = []
+    syms: list[str] = []  # cached index symbols
     while True:
         try:
             if not syms:
@@ -313,6 +313,20 @@ async def _index_loop(index: str, interval_min: int, concurrency: int = 4):
                     print(f"[index auto] 取得指數 {index} 成分失敗: {e}; 5 分鐘後重試")
                     await asyncio.sleep(300)
                     continue
+            # --- Feature C: merge any new existing CSV symbols in data/ directory ---
+            try:
+                existing = []
+                for p in DATA_DIR.glob('*_short_term_with_lag3.csv'):
+                    sym = p.stem.replace('_short_term_with_lag3', '')
+                    existing.append(sym.upper())
+                merged = list(dict.fromkeys(syms + existing))
+                if len(merged) != len(syms):
+                    added = set(merged) - set(syms)
+                    if added:
+                        print(f"[index auto] 偵測到新 CSV symbols 將納入自動更新: {sorted(list(added))[:8]}{'...' if len(added)>8 else ''}")
+                    syms = merged
+            except Exception as e:
+                print(f"[index auto] merge existing csv symbols 失敗: {e}")
             sem = asyncio.Semaphore(max(1, int(concurrency)))
             async def _build_one(sym: str):
                 async with sem:
@@ -572,6 +586,38 @@ def auto_list_index():
     reg = _load_index_auto_registry()
     running = [k for k, v in INDEX_TASKS.items() if not v.done()]
     return {"ok": True, "registry": reg, "running": running}
+
+@app.get('/api/auto/start_existing_csvs')
+async def auto_start_existing_csvs(interval: int = 5):
+    """(Feature A) Start individual symbol auto-loops for every existing *_short_term_with_lag3.csv in data/.
+
+    This will enumerate current CSV files and create per-symbol loops (similar to calling start_many).
+    WARNING: If there are hundreds of symbols this can create many concurrent tasks; prefer index loop for large sets.
+    """
+    syms = []
+    for p in DATA_DIR.glob('*_short_term_with_lag3.csv'):
+        sym = p.stem.replace('_short_term_with_lag3', '')
+        syms.append(sym)
+    syms = list(dict.fromkeys([s for s in syms if s]))
+    if not syms:
+        return JSONResponse({"ok": False, "error": "找不到任何已存在的 symbol CSV"}, status_code=404)
+    reg = _load_auto_registry()
+    loop = asyncio.get_running_loop()
+    started = {}
+    for s in syms:
+        if s in SYMBOL_TASKS and not SYMBOL_TASKS[s].done():
+            started[s] = "already running"
+            reg[s] = int(interval)
+            continue
+        try:
+            task = loop.create_task(_symbol_loop(s, interval))
+            SYMBOL_TASKS[s] = task
+            reg[s] = int(interval)
+            started[s] = "started"
+        except Exception as e:
+            started[s] = f"error: {e}"
+    _save_auto_registry(reg)
+    return {"ok": True, "count": len(started), "interval_min": interval, "results": started}
 
 
 @app.get('/api/auto/start_many')
