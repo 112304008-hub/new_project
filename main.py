@@ -275,9 +275,18 @@ def _save_index_auto_registry(reg: dict):
     except Exception as e:
         print(f"[warning] 無法寫入 index auto registry: {e}")
 
-async def _symbol_loop(symbol: str, interval_min: int):
-    print(f"[symbol auto] 啟動自動更新：{symbol} every {interval_min} min")
+async def _symbol_loop(symbol: str, interval_min: int, backoff_factor: float = 2.0, max_backoff_min: int = 30):
+    """Per-symbol auto update loop with exponential backoff on consecutive failures.
+
+    Success path: sleep 固定 base interval。
+    Failure path: sleep = min(interval * backoff_factor**consecutive_failures, max_backoff_min).
+    任何一次成功即重置失敗計數。
+    """
+    print(f"[symbol auto] 啟動自動更新：{symbol} every {interval_min} min (backoff_factor={backoff_factor}, max_backoff={max_backoff_min}m)")
+    consecutive_failures = 0
+    base = max(1, int(interval_min))
     while True:
+        success = False
         try:
             p = _symbol_csv_path(symbol)
             await asyncio.to_thread(lambda: (_ensure_yf(), _build_from_yfinance(symbol=symbol, out_csv=p)))
@@ -288,11 +297,20 @@ async def _symbol_loop(symbol: str, interval_min: int):
                     f.write(datetime.now().isoformat())
             except Exception:
                 pass
+            success = True
         except Exception as e:
-            print(f"[symbol auto] 更新 {symbol} 失敗: {e}")
-        await asyncio.sleep(max(1, int(interval_min)) * 60)
+            consecutive_failures += 1
+            print(f"[symbol auto] 更新 {symbol} 失敗 (#{consecutive_failures}): {e}")
+        if success:
+            if consecutive_failures:
+                print(f"[symbol auto] {symbol} 恢復成功，重置 backoff")
+            consecutive_failures = 0
+            sleep_for = base
+        else:
+            sleep_for = min(int(max_backoff_min), int(base * (backoff_factor ** consecutive_failures)))
+        await asyncio.sleep(sleep_for * 60)
 
-async def _index_loop(index: str, interval_min: int, concurrency: int = 4):
+async def _index_loop(index: str, interval_min: int, concurrency: int = 4, backoff_factor: float = 2.0, max_backoff_min: int = 30):
     """Loop that (re)builds all symbols of an index every interval minutes.
 
     Strategy: fetch full list once at start (retry inside loop if empty), then each cycle:
@@ -300,9 +318,12 @@ async def _index_loop(index: str, interval_min: int, concurrency: int = 4):
       - build CSV if missing or stale (we rebuild unconditionally to keep recent data)
     This avoids spawning one persistent task per symbol and centralizes scheduling.
     """
-    print(f"[index auto] 啟動指數自動更新：{index} every {interval_min} min (concurrency={concurrency})")
+    print(f"[index auto] 啟動指數自動更新：{index} every {interval_min} min (concurrency={concurrency}, backoff_factor={backoff_factor}, max_backoff={max_backoff_min}m)")
     syms: list[str] = []  # cached index symbols
+    consecutive_failures = 0
+    base = max(1, int(interval_min))
     while True:
+        cycle_failed = False
         try:
             if not syms:
                 try:
@@ -311,6 +332,7 @@ async def _index_loop(index: str, interval_min: int, concurrency: int = 4):
                     syms = list(dict.fromkeys([s.upper() for s in syms]))
                 except Exception as e:
                     print(f"[index auto] 取得指數 {index} 成分失敗: {e}; 5 分鐘後重試")
+                    cycle_failed = True
                     await asyncio.sleep(300)
                     continue
             # --- Feature C: merge any new existing CSV symbols in data/ directory ---
@@ -327,6 +349,7 @@ async def _index_loop(index: str, interval_min: int, concurrency: int = 4):
                     syms = merged
             except Exception as e:
                 print(f"[index auto] merge existing csv symbols 失敗: {e}")
+                cycle_failed = True
             sem = asyncio.Semaphore(max(1, int(concurrency)))
             async def _build_one(sym: str):
                 async with sem:
@@ -342,15 +365,30 @@ async def _index_loop(index: str, interval_min: int, concurrency: int = 4):
                             pass
                     except Exception as e:
                         print(f"[index auto] 更新 {sym} 失敗: {e}")
+                        nonlocal_cycle_failed.append(True)
             tasks = [asyncio.create_task(_build_one(s)) for s in syms]
+            # track per-symbol failures by capturing in list (Python scoping workaround)
+            nonlocal_cycle_failed = []
             await asyncio.gather(*tasks)
+            if nonlocal_cycle_failed:
+                cycle_failed = True
         except asyncio.CancelledError:
             print(f"[index auto] 指數 {index} loop 已取消")
             raise
         except Exception as e:
             print(f"[index auto] 迴圈錯誤：{e}")
-        # sleep interval
-        await asyncio.sleep(max(1, int(interval_min)) * 60)
+            cycle_failed = True
+        # backoff sleep logic
+        if cycle_failed:
+            consecutive_failures += 1
+            sleep_for = min(int(max_backoff_min), int(base * (backoff_factor ** consecutive_failures)))
+            print(f"[index auto] {index} 本輪有失敗，使用 backoff 休息 {sleep_for} 分鐘 (連續失敗 {consecutive_failures})")
+        else:
+            if consecutive_failures:
+                print(f"[index auto] {index} 復原成功，重置 backoff")
+            consecutive_failures = 0
+            sleep_for = base
+        await asyncio.sleep(sleep_for * 60)
 
 
 @app.get('/api/build_symbol')
@@ -507,20 +545,20 @@ def bulk_build_stop(task_id: str):
 
 
 @app.get('/api/auto/start_symbol')
-async def auto_start_symbol(symbol: str, interval: int = 5):
+async def auto_start_symbol(symbol: str, interval: int = 5, backoff_factor: float = 2.0, max_backoff: int = 30):
     """Start auto-update loop for a symbol (every `interval` minutes)."""
     if not symbol:
         return JSONResponse({"ok": False, "error": "請提供 symbol 參數"}, status_code=400)
     if symbol in SYMBOL_TASKS and not SYMBOL_TASKS[symbol].done():
         return {"ok": True, "status": "already running", "symbol": symbol}
     loop = asyncio.get_event_loop()
-    task = loop.create_task(_symbol_loop(symbol, interval))
+    task = loop.create_task(_symbol_loop(symbol, interval, backoff_factor=backoff_factor, max_backoff_min=max_backoff))
     SYMBOL_TASKS[symbol] = task
     # persist
     reg = _load_auto_registry()
-    reg[symbol] = int(interval)
+    reg[symbol] = {"interval": int(interval), "backoff_factor": float(backoff_factor), "max_backoff": int(max_backoff)}
     _save_auto_registry(reg)
-    return {"ok": True, "status": "started", "symbol": symbol, "interval_min": interval}
+    return {"ok": True, "status": "started", "symbol": symbol, "interval_min": interval, "backoff_factor": backoff_factor, "max_backoff": max_backoff}
 
 
 @app.get('/api/auto/stop_symbol')
@@ -546,7 +584,7 @@ def auto_list_registry():
     return {"ok": True, "registry": reg}
 
 @app.get('/api/auto/start_index')
-async def auto_start_index(index: str, interval: int = 5, concurrency: int = 4):
+async def auto_start_index(index: str, interval: int = 5, concurrency: int = 4, backoff_factor: float = 2.0, max_backoff: int = 30):
     """Start an auto-update loop for an entire index (sp500 / nasdaq100 / twse).
     This runs a single loop instead of hundreds of symbol loops.
     NOTE: Running both per-symbol loops and index loop for overlapping symbols may cause extra load.
@@ -557,12 +595,12 @@ async def auto_start_index(index: str, interval: int = 5, concurrency: int = 4):
     if ix in INDEX_TASKS and not INDEX_TASKS[ix].done():
         return {"ok": True, "status": "already running", "index": ix}
     loop = asyncio.get_running_loop()
-    task = loop.create_task(_index_loop(ix, interval, concurrency))
+    task = loop.create_task(_index_loop(ix, interval, concurrency, backoff_factor=backoff_factor, max_backoff_min=max_backoff))
     INDEX_TASKS[ix] = task
     reg = _load_index_auto_registry()
-    reg[ix] = {"interval": int(interval), "concurrency": int(concurrency)}
+    reg[ix] = {"interval": int(interval), "concurrency": int(concurrency), "backoff_factor": float(backoff_factor), "max_backoff": int(max_backoff)}
     _save_index_auto_registry(reg)
-    return {"ok": True, "status": "started", "index": ix, "interval_min": interval, "concurrency": concurrency}
+    return {"ok": True, "status": "started", "index": ix, "interval_min": interval, "concurrency": concurrency, "backoff_factor": backoff_factor, "max_backoff": max_backoff}
 
 @app.get('/api/auto/stop_index')
 def auto_stop_index(index: str):
@@ -588,7 +626,7 @@ def auto_list_index():
     return {"ok": True, "registry": reg, "running": running}
 
 @app.get('/api/auto/start_existing_csvs')
-async def auto_start_existing_csvs(interval: int = 5):
+async def auto_start_existing_csvs(interval: int = 5, backoff_factor: float = 2.0, max_backoff: int = 30):
     """(Feature A) Start individual symbol auto-loops for every existing *_short_term_with_lag3.csv in data/.
 
     This will enumerate current CSV files and create per-symbol loops (similar to calling start_many).
@@ -607,17 +645,17 @@ async def auto_start_existing_csvs(interval: int = 5):
     for s in syms:
         if s in SYMBOL_TASKS and not SYMBOL_TASKS[s].done():
             started[s] = "already running"
-            reg[s] = int(interval)
+            reg[s] = {"interval": int(interval), "backoff_factor": float(backoff_factor), "max_backoff": int(max_backoff)}
             continue
         try:
-            task = loop.create_task(_symbol_loop(s, interval))
+            task = loop.create_task(_symbol_loop(s, interval, backoff_factor=backoff_factor, max_backoff_min=max_backoff))
             SYMBOL_TASKS[s] = task
-            reg[s] = int(interval)
+            reg[s] = {"interval": int(interval), "backoff_factor": float(backoff_factor), "max_backoff": int(max_backoff)}
             started[s] = "started"
         except Exception as e:
             started[s] = f"error: {e}"
     _save_auto_registry(reg)
-    return {"ok": True, "count": len(started), "interval_min": interval, "results": started}
+    return {"ok": True, "count": len(started), "interval_min": interval, "backoff_factor": backoff_factor, "max_backoff": max_backoff, "results": started}
 
 
 @app.get('/api/auto/start_many')
@@ -635,11 +673,17 @@ async def auto_start_many(symbols: str, interval: int = 5):
         try:
             if s in SYMBOL_TASKS and not SYMBOL_TASKS[s].done():
                 out[s] = {"ok": True, "status": "already running"}
-                reg[s] = int(interval)
+                # preserve any existing advanced config
+                prev = reg.get(s)
+                if isinstance(prev, dict):
+                    prev.update({"interval": int(interval)})
+                    reg[s] = prev
+                else:
+                    reg[s] = {"interval": int(interval), "backoff_factor": 2.0, "max_backoff": 30}
                 continue
-            task = loop.create_task(_symbol_loop(s, interval))
+            task = loop.create_task(_symbol_loop(s, interval))  # default backoff values (legacy)
             SYMBOL_TASKS[s] = task
-            reg[s] = int(interval)
+            reg[s] = {"interval": int(interval), "backoff_factor": 2.0, "max_backoff": 30}
             out[s] = {"ok": True, "status": "started"}
         except Exception as e:
             out[s] = {"ok": False, "error": str(e)}
@@ -1079,11 +1123,21 @@ async def _rehydrate_auto_registry():
         if reg:
             print(f"[startup] rehydrating auto symbol registry: {reg}")
             loop = asyncio.get_event_loop()
-            for sym, interval in reg.items():
+            for sym, cfg in reg.items():
                 try:
                     if sym in SYMBOL_TASKS and not SYMBOL_TASKS[sym].done():
                         continue
-                    task = loop.create_task(_symbol_loop(sym, int(interval)))
+                    # backward compatibility: int -> interval only
+                    if isinstance(cfg, int):
+                        interval = int(cfg)
+                        bf, mb = 2.0, 30
+                    elif isinstance(cfg, dict):
+                        interval = int(cfg.get('interval', 5))
+                        bf = float(cfg.get('backoff_factor', 2.0))
+                        mb = int(cfg.get('max_backoff', 30))
+                    else:
+                        interval, bf, mb = 5, 2.0, 30
+                    task = loop.create_task(_symbol_loop(sym, interval, backoff_factor=bf, max_backoff_min=mb))
                     SYMBOL_TASKS[sym] = task
                 except Exception as e:
                     print(f"[startup] failed to start auto for {sym}: {e}")
@@ -1101,7 +1155,9 @@ async def _rehydrate_auto_registry():
                 try:
                     interval = int(cfg.get('interval', 5))
                     concurrency = int(cfg.get('concurrency', 4))
-                    task = loop.create_task(_index_loop(ix, interval, concurrency))
+                    bf = float(cfg.get('backoff_factor', 2.0))
+                    mb = int(cfg.get('max_backoff', 30))
+                    task = loop.create_task(_index_loop(ix, interval, concurrency, backoff_factor=bf, max_backoff_min=mb))
                     INDEX_TASKS[ix] = task
                 except Exception as e:
                     print(f"[startup] failed to start index auto for {ix}: {e}")

@@ -16,7 +16,9 @@
 | 單 / 多股票資料建置 | `/api/build_symbol`, `/api/build_symbols` 建立指定 CSV |
 | 指數批次建置 | `/api/bulk_build_start?index=sp500` 等啟動背景任務 |
 | 背景任務狀態 | `/api/bulk_build_status?task_id=...` 查詢進度 |
-| 自動循環更新 | `/api/auto/start_symbol` 啟動每 X 分鐘更新某股票資料 |
+| 自動循環更新 | `/api/auto/start_symbol` 啟動每 X 分鐘更新某股票資料 (支援 backoff) |
+| 指數自動更新 | `/api/auto/start_index` 以單一 loop 更新整個指數成分 (含動態合併現有 CSV) |
+| 批量啟動既有 CSV | `/api/auto/start_existing_csvs` 為 data/ 下所有現有 CSV 建立 symbol loop |
 | 模型與閾值 | `models/` 內存放 `*_pipeline.pkl` 與對應 threshold |
 | 診斷資訊 | `/api/diagnostics` 與 `/api/latest_features` 等端點 |
 | 健康檢查 | `/health` 提供容器與依賴狀態回報 |
@@ -303,7 +305,10 @@ docker build --build-arg APP_GIT_SHA=$sha --build-arg APP_BUILD_TIME=$ts -t new-
 | `/api/build_symbols` | GET | 建構多檔 | symbols CSV | 是 |
 | `/api/bulk_build_start` | GET | 啟動批次 | index / symbols / concurrency | 是 |
 | `/api/bulk_build_status` | GET | 批次進度 | task_id | 是 |
-| `/api/auto/start_symbol` | GET | 自動更新 symbol | symbol, interval | 是 |
+| `/api/auto/start_symbol` | GET | 自動更新 symbol | symbol, interval, backoff_factor?, max_backoff? | 是 |
+| `/api/auto/start_index` | GET | 指數集中式自動更新 | index, interval, concurrency, backoff_factor?, max_backoff? | 是 |
+| `/api/auto/list_index` | GET | 顯示指數 loop registry 與執行中 | - | 是 |
+| `/api/auto/start_existing_csvs` | GET | 為現有 CSV 啟動 loops | interval, backoff_factor?, max_backoff? | 是 |
 | `/api/auto/stop_symbol` | GET | 停止自動 | symbol | 是 |
 | `/api/diagnostics` | GET | 診斷統計 | n_bins | 是 |
 | `/api/latest_features` | GET | 最新特徵 | features / pattern / symbol | 是 |
@@ -322,9 +327,71 @@ docker build --build-arg APP_GIT_SHA=$sha --build-arg APP_BUILD_TIME=$ts -t new-
 ---
 
 ## 10. 背景任務與排程 (Background Tasks)
-機制：FastAPI 啟動後讀取 auto registry → 啟動對應 symbol loop。
-避免爆量：限制同時 concurrency；可手動停用 `/api/auto/stop_symbol`。
-建議：大量 symbol 背景更新時監控 CPU / 網路頻寬。
+### 10.1 類型總覽
+| 類型 | 說明 | 適用情境 | 優點 | 風險 |
+|------|------|----------|------|------|
+| Symbol Loop | 為單一股票建立固定週期更新 | 少量重要股票 | 精準控制個別 interval | 大量時產生許多協程開銷 |
+| Index Loop | 單一協程批量更新指數成分 + 動態合併現有 CSV | 上百檔 / 全市場 | 降低協程數量；集中節流 | 單點延遲影響整批完成時間 |
+| Existing CSV Bootstrap | 掃描 data/ 啟動所有現有 symbol loop | 已先行批次建立大量 CSV | 快速接管既有檔案 | 可能一次啟動過多任務 |
+
+### 10.2 Backoff / Retry 策略
+自動更新 loop (symbol / index) 支援指數式後退：
+```
+sleep = min(max_backoff, interval * backoff_factor ** consecutive_failures)
+```
+一旦成功執行即重置 `consecutive_failures`。
+
+Default：`backoff_factor=2.0`, `max_backoff=30 (分鐘)`。
+
+啟動範例：
+```
+/api/auto/start_symbol?symbol=AAPL&interval=5&backoff_factor=2&max_backoff=20
+/api/auto/start_index?index=sp500&interval=5&concurrency=6&backoff_factor=1.8&max_backoff=25
+```
+
+### 10.3 Registry 格式變更
+`auto_registry.json` / `index_auto_registry.json` 內部條目已從：
+```
+"AAPL": 5
+```
+演進為：
+```
+"AAPL": { "interval": 5, "backoff_factor": 2.0, "max_backoff": 30 }
+```
+啟動時向下相容（偵測為 int 則套用預設 backoff 參數）。
+
+### 10.4 何時選擇哪一種？
+| 目標 | 推薦方式 | 備註 |
+|------|----------|------|
+| 少於 10 檔關鍵股票 | 多個 Symbol Loop | 最簡單直觀 |
+| 50~500 檔大量更新 | Index Loop | 降低協程；統一節奏 |
+| 已先批次拉資料後希望同步 | Existing CSV + Index Loop | 先 bootstrap，再切換集中管理 |
+| 想依個別股票調整頻率 | Symbol Loop | 支援不同 interval |
+
+### 10.5 指數 Loop 動態合併
+每輪執行前會掃描 `data/` 內 `*_short_term_with_lag3.csv`，若出現新檔案（例如你離線產生或透過 bulk 建置），自動納入下一輪更新。
+
+### 10.6 常見調校建議
+| 症狀 | 調整建議 |
+|------|----------|
+| Yahoo Finance 頻繁失敗 | 降低 `concurrency` 或提高 `interval`；調整 `backoff_factor` > 2.0 |
+| 更新延遲放大 | 檢查是否發生多輪失敗導致 backoff；觀察日誌 | 
+| CPU 過高 | 降低 Index Loop `concurrency`；避免同時 Symbol + Index 重疊 |
+| 記憶體成長 | 減少同時執行的 Symbol Loop 數量 |
+
+### 10.7 停止與檢視
+```
+/api/auto/stop_symbol?symbol=AAPL
+/api/auto/stop_index?index=sp500
+/api/auto/list_index  # 檢視正在運作與 registry 設定
+/api/auto/list_registry  # 檢視 symbol registry
+```
+
+### 10.8 移轉策略建議 (大量股票)
+1. 先執行一次 bulk 建置：`/api/bulk_build_start?index=sp500&concurrency=8`
+2. 等待完成 → 啟動 index loop：`/api/auto/start_index?index=sp500&interval=5&concurrency=6`
+3. 可選：對極少數高頻 symbol 額外啟動獨立 loop（不同 interval）。
+4. 避免：為全部成分同時啟動數百個 symbol loop（管理成本與資源佔用高）。
 
 ---
 
@@ -351,6 +418,7 @@ scrape_configs:
 | app_http_requests_total{status=~"5.."} / sum(all) | >2% | 失敗率上升 |
 | app_models_ready == 0 | 任何時間 | 模型遺失 |
 | app_background_tasks 高於基線 | 持續 10m | 堆積 |
+| 指數更新日志多次連續失敗 | 觀察 backoff 日誌訊息 | 網路或來源阻擋 |
 
 ---
 
@@ -419,6 +487,7 @@ server {
 | `/health` 失敗 | docker logs / 檢查依賴 | 重建或確認套件版本 |
 | 模型未準備 | `/health` models_ready=0 | 確認掛載 models/ 與檔名格式 *_pipeline.pkl |
 | 預測慢 | 查看 latency histogram | 減少同時 bulk build / 增 cache |
+| 指數 loop 休眠時間異常變長 | backoff 生效 (連續失敗) | 查日誌找出失敗根因 |
 | 記憶體攀升 | process_resident_memory_bytes | 降低自動更新數量 / 增容器限制 |
 | 429 Too Many Requests | 日誌計數 | 調整 RATE_LIMIT_PER_MIN 或導入 API Key 分流 |
 
