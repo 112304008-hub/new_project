@@ -1,0 +1,19 @@
+services:
+  web:
+    image: new_project:latest
+    container_name: newproject_web_prod
+    # No bind mounts: all data/models baked inside image
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - API_KEY=${API_KEY:-}
+      - RATE_LIMIT_PER_MIN=200
+    restart: unless-stopped
+    # Healthcheck comes from Dockerfile
+
+# Usage:
+# 1. Build image with artifacts baked:
+#    powershell: $sha = git rev-parse --short HEAD; $ts = (Get-Date -Format o); docker build --build-arg APP_GIT_SHA=$sha --build-arg APP_BUILD_TIME=$ts -t new_project:$sha -t new_project:latest .
+# 2. Run: docker compose -f docker-compose.prod.yml up -d
+# 3. Verify: curl http://localhost:8000/health

@@ -268,7 +268,8 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 | 模式 | 說明 | 適合 | 備註 |
 |------|------|------|------|
 | 本地直接執行 | venv + uvicorn | 開發 | 變更快速, 無隔離 |
-| Docker 單容器 | docker compose | 小型上線 | 持久層使用 bind mount |
+| Docker 開發 (掛載) | `docker-compose.yml` | 開發 / 測試 | 掛載原始碼與 data/models 熱更新 |
+| Docker 生產（烤入資料） | `docker-compose.prod.yml` | 交付 / 發佈 | 不掛載；重建 image 才更新資料模型 |
 | 多主機（手動） | 手動分發 image | 內部測試 | 可 docker save / load |
 | Registry 發佈 | push 到 Docker Hub / ECR | 穩定長期 | 建議加 CI/CD |
 | K8s (未內建範例) | Deployment + Service + Ingress | 水平擴展 | 需加共享儲存 & 分布式限流 |
@@ -447,12 +448,41 @@ scrape_configs:
 ---
 
 ## 14. 部署指引摘要
-### Docker Compose
+### Docker Compose (開發模式)
+掛載本機目錄（原本 `docker-compose.yml`）：
 ```bash
 docker compose build \
   --build-arg APP_GIT_SHA=$(git rev-parse --short HEAD) \
   --build-arg APP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 API_KEY=YourKey RATE_LIMIT_PER_MIN=200 docker compose up -d
+```
+
+### 生產模式：烤入資料與模型（無 bind mount）
+1. 確保要隨映像提供的 `models/` 與最小 `data/` CSV 已放入專案根目錄。
+2. 建置映像：
+```bash
+docker build \
+  --build-arg APP_GIT_SHA=$(git rev-parse --short HEAD) \
+  --build-arg APP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  -t new_project:$(git rev-parse --short HEAD) -t new_project:latest .
+```
+3. 啟動（不掛載資料）：
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+4. 驗證：
+```bash
+curl http://localhost:8000/health
+```
+5. 更新模型或資料：替換本機檔案 → 重新 build → 重新 up：
+```bash
+docker compose -f docker-compose.prod.yml down
+docker build -t new_project:latest .
+docker compose -f docker-compose.prod.yml up -d
+```
+6. 導出映像（離線交付）：
+```bash
+docker save new_project:latest -o new_project_latest.tar
 ```
 
 ### Systemd (Linux)
@@ -472,10 +502,10 @@ server {
 ## 15. 災難復原與備份 (DR & Backup)
 | 資產 | 重要性 | 建議備份頻率 | 備註 |
 |------|--------|--------------|------|
-| models/ | 高 | 每模型更新 | 可加版本號副檔名 |
-| data/*.csv | 中 | 每日 / 產生後 | 可壓縮存放 object storage |
+| models/ | 高 | 每模型更新 | 可加版本號副檔名；若生產烤入需 rebuild |
+| data/*.csv | 中 | 每日 / 產生後 | 可壓縮存放 object storage；若生產烤入需 rebuild |
 | auto_registry.json | 中 | 每次變動 | 復原自動任務狀態 |
-| Docker image | 中 | 每次 build | Tag 含 SHA |
+| baked Docker image | 中 | 每次 build | Tag 含 SHA；可 `docker save` 備份 |
 
 恢復流程：拉回 image → 還原 models/ → 還原 data/ → 啟動 → 驗證 `/health`。
 
