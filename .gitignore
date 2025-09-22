@@ -78,3 +78,21 @@ models/
 # Sensitive files
 secrets.env
 
+# --- Project specific: volatile generated data & registries ---
+data/*_last_update.txt
+data/*_summary.json
+data/auto_registry.json
+data/*_short_term_with_lag3.csv
+
+# If you want to keep a tiny sample for docs, place it under data/examples/ and whitelist:
+!data/examples/
+
+# Model artifacts can be large; ignore by default (remove if you version models)
+models/*.pkl
+models/*.joblib
+models/*_threshold.*
+
+# Logs / temp
+logs/
+*.tmp
+
