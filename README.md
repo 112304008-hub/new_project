@@ -548,3 +548,30 @@ server {
 ---
 
 > 本文件已提供開發、部署、維運、監控與安全所需之完整參考。若需英文版或進一步自動化 (CI/CD / Kubernetes) 可再提出需求。
+
+---
+
+## 🌐 生產環境自動 HTTPS（Caddy）
+我們在 `docker-compose.prod.yml` 加入了 Caddy 反向代理，會自動透過 Let’s Encrypt 申請與續約 TLS 憑證。
+
+步驟：
+1) 建置映像（烤入資料 / 模型）
+  - PowerShell
+    - `$sha = git rev-parse --short HEAD; $ts = (Get-Date -Format o)`
+    - `docker build --build-arg APP_GIT_SHA=$sha --build-arg APP_BUILD_TIME=$ts -t new_project:$sha -t new_project:latest .`
+2) DNS：將你的 `DOMAIN`（例如 `app.example.com`）的 A 記錄指向伺服器 Public IP。
+3) 建立 `.env`（參考 `.env.example`）
+  - `DOMAIN=app.example.com`
+  - `ACME_EMAIL=you@example.com`
+  - 可選擇加入 `API_KEY` 與其他變數。
+4) 啟動：
+  - `docker compose -f docker-compose.prod.yml up -d`
+  - Caddy 設定檔：`infra/caddy/conf/Caddyfile`
+  - Caddy 憑證/設定資料：`infra/caddy/data`, `infra/caddy/config`
+5) 驗證：
+  - 瀏覽 `https://app.example.com/health`
+
+說明：
+- `web` 服務只在內部網路上 `expose: 8000`，公開的 80/443 由 `caddy` 服務對外提供。
+- `Caddyfile` 支援用 `{$DOMAIN}` 讀取環境變數，並自動配置 TLS。
+- 若你無 Public DNS（純內網），可改用自簽或在 Caddy 中加 `tls internal`（僅供測試）。

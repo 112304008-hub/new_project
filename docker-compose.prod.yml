@@ -3,17 +3,51 @@ services:
     image: new_project:latest
     container_name: newproject_web_prod
     # No bind mounts: all data/models baked inside image
-    ports:
-      - "8000:8000"
+    # Expose only to the internal network; Caddy handles public 80/443
+    expose:
+      - "8000"
     environment:
       - PYTHONUNBUFFERED=1
       - API_KEY=${API_KEY:-}
       - RATE_LIMIT_PER_MIN=200
     restart: unless-stopped
     # Healthcheck comes from Dockerfile
+    networks:
+      - webnet
+
+  # Automatic HTTPS reverse proxy
+  caddy:
+    image: caddy:2-alpine
+    container_name: newproject_caddy
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # These are read inside the Caddyfile using {$VAR} placeholders
+      - DOMAIN=${DOMAIN}
+      - ACME_EMAIL=${ACME_EMAIL:-}
+    volumes:
+      - ./infra/caddy/conf/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/data:/data
+      - ./infra/caddy/config:/config
+    restart: unless-stopped
+    networks:
+      - webnet
+
+networks:
+  webnet:
+    driver: bridge
+
+volumes: {}
 
 # Usage:
-# 1. Build image with artifacts baked:
-#    powershell: $sha = git rev-parse --short HEAD; $ts = (Get-Date -Format o); docker build --build-arg APP_GIT_SHA=$sha --build-arg APP_BUILD_TIME=$ts -t new_project:$sha -t new_project:latest .
-# 2. Run: docker compose -f docker-compose.prod.yml up -d
-# 3. Verify: curl http://localhost:8000/health
+# 1) Build the image with artifacts baked in:
+#    PowerShell:
+#      $sha = git rev-parse --short HEAD; $ts = (Get-Date -Format o)
+#      docker build --build-arg APP_GIT_SHA=$sha --build-arg APP_BUILD_TIME=$ts -t new_project:$sha -t new_project:latest .
+# 2) Create a DNS A record for your domain -> <server public IP>
+# 3) Create a .env with DOMAIN=your.domain.com and ACME_EMAIL=you@example.com
+# 4) Run: docker compose -f docker-compose.prod.yml up -d
+# 5) Verify: https://<your domain>/health
