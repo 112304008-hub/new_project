@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "results": {
+    "2330": {
+      "ok": true,
+      "saved_to": "c:\\Users\\runyu\\OneDrive\\桌面\\new-project\\data\\short_term_with_lag3.csv",
+      "rows": 1368
+    },
+    "2317": {
+      "ok": true,
+      "saved_to": "c:\\Users\\runyu\\OneDrive\\桌面\\new-project\\data\\short_term_with_lag3.csv",
+      "rows": 1368
+    },
+    "AAPL": {
+      "ok": true,
+      "saved_to": "c:\\Users\\runyu\\OneDrive\\桌面\\new-project\\data\\short_term_with_lag3.csv",
+      "rows": 1415
+    },
+    "MSFT": {
+      "ok": false,
+      "error": "You have run out of API credits for the current minute. 10 API credits were used, with the current limit being 8. Wait for the next minute or consider switching to a higher tier plan at https://twelvedata.com/pricing"
+    }
+  }
+}
