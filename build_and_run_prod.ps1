@@ -8,13 +8,17 @@ $sha = (git rev-parse --short HEAD) 2>$null
 if (-not $sha) { $sha = "nogit" }
 $ts = (Get-Date -Format o)
 
-Write-Host "==> Building image $ImageName:$sha" -ForegroundColor Cyan
+# Ensure BuildKit is enabled for faster builds and cache mounts
+$env:DOCKER_BUILDKIT = "1"
+$env:COMPOSE_DOCKER_CLI_BUILD = "1"
+
+Write-Host "==> Building image ${ImageName}:${sha}" -ForegroundColor Cyan
 $buildCmd = @(
   "docker","build",
   "--build-arg","APP_GIT_SHA=$sha",
   "--build-arg","APP_BUILD_TIME=$ts",
-  "-t","$ImageName:$sha",
-  "-t","$ImageName:latest",
+  "-t","${ImageName}:${sha}",
+  "-t","${ImageName}:latest",
   "."
 ) -join ' '
 Invoke-Expression $buildCmd
@@ -40,4 +44,4 @@ try {
   exit 1
 }
 
-Write-Host "==> Done: image=$ImageName:$sha" -ForegroundColor Green
+Write-Host "==> Done: image=${ImageName}:${sha}" -ForegroundColor Green

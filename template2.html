@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>股價之神・籤筒 Demo（完整預測版）</title>
   <style>
     :root{
@@ -254,45 +254,84 @@
     /* page background image (toggled) */
     .page-bg {
       position:fixed; inset:0; z-index: 0; background-size: cover; background-position: center center; background-repeat: no-repeat;
-      opacity:0.50; filter: saturate(1.12) contrast(1.08) brightness(1.02); pointer-events:none;
-      transition: opacity .25s ease, filter .25s ease; mix-blend-mode: multiply;
+      /* Make background fully opaque to avoid underlying white showing through */
+      opacity:1; filter: saturate(1.08) contrast(1.04) brightness(1.0); pointer-events:none;
+      transition: opacity .25s ease, filter .25s ease; mix-blend-mode: normal; background-color:#000;
+      /* Ensure full dynamic viewport coverage on mobile */
+      min-height: 100dvh;
     }
+    html, body { min-height: 100dvh; }
     /* ensure main interactive content sits above the background;
        do NOT override .scroll-with-rods positioning (we want its earlier fixed/absolute rules to apply) */
-    .stage, .parchment, .lottery-tube { z-index: 30; position: relative; }
-    .scroll-with-rods { z-index: 30; /* keep position as declared above */ }
+   .stage, .parchment, .lottery-tube { z-index: 30; position: relative; }
+   .scroll-with-rods { z-index: 30; }
+   /* panels container: responsive grid */
+   .panels{ display:grid; grid-template-columns: 1fr 1fr; gap: 16px; width:min(1100px, 96vw); margin: 12px auto 24px; box-sizing:border-box; }
+   @media (max-width: 1024px){ .panels{ grid-template-columns: 1fr; } }
     /* override: when parchment is also scroll-with-rods, keep it fixed and scrollable
        so the decorative rods stay flush to the container top/bottom while content scrolls */
-    .parchment.scroll-with-rods{
-      position: fixed !important;
-      overflow: auto !important;
-      box-sizing: border-box;
-      /* ensure rods sit near edges and content scrolls between them */
-      padding-top: 36px !important;
-      padding-bottom: 36px !important;
-    }
+    .parchment.scroll-with-rods{ position: relative !important; overflow: auto !important; box-sizing: border-box; padding-top: 36px !important; padding-bottom: 36px !important; }
     /* slightly nudge rod to container edges (adjust as needed) */
     .scroll-with-rods .rod-top{ top: 8px; }
     .scroll-with-rods .rod-bottom{ bottom: 8px; }
+
+    /* === Responsive tweaks for mobile === */
+    @media (max-width: 768px) {
+      /* nudge background focus a bit to the right on narrow screens to keep subjects centered */
+      .page-bg{ background-position: 60% center; }
+      :root{
+        --tube-w: 150px;
+        --tube-h: 220px;
+      }
+      body{ display:block; }
+    .stage{ width:100vw; height:auto; padding:16px 12px 8px; box-sizing:border-box; margin:0 auto; }
+    /* reset stacking so content flows top->bottom without covering each other */
+    .stage, .parchment, .scroll-with-rods, .lottery-tube{ z-index: auto !important; }
+      .table-shadow{ width:70%; bottom:6%; }
+      .hint{ font-size:0.9rem; text-align:center; }
+      .omikuji{ width:calc(100vw - 24px); margin:12px auto 0; }
+      /* inputs/buttons more touch-friendly */
+      .stage input#symbolInput{ width:clamp(180px, 65vw, 320px); padding:10px; font-size:16px; }
+      .stage #test{ font-size:14px; }
+      /* background toggles: keep in view and not overlap */
+      #bgToggle{ right:8px; top:8px; padding:6px 8px; font-size:12px; }
+      #bgStatus{ right:8px; top:44px; padding:4px 6px; font-size:11px; }
+      /* stack side scrolls under stage, full-width, simpler chrome */
+      #leftScroll, #rightScroll{ width: auto !important; max-width:100%; box-sizing:border-box; max-height: 42vh; font-size: 13px; display: block !important; }
+      /* simplify decorative rods on small screens */
+      .scroll-with-rods .rod, .scroll-with-rods::before, .scroll-with-rods::after{ display:none !important; }
+      .scroll-with-rods .scroll-inner{ position: static; top:auto; bottom:auto; left:auto; right:auto; padding:8px; max-height:42vh; overflow:auto; }
+      /* cancel fixed parchment to avoid overlay issues */
+  .parchment.scroll-with-rods{ padding-top:12px !important; padding-bottom:12px !important; max-height:42vh; }
+    }
+    /* Support narrower desktop windows: stack panels below the stage */
+    @media (max-width: 1024px){ .stage{ width:100vw; padding:16px 12px 8px; box-sizing:border-box; margin:0 auto; } .stage, .parchment, .scroll-with-rods, .lottery-tube{ z-index:auto !important; } }
+
+    /* Desktop: put panels back to fixed left/right sidebars */
+    @media (min-width: 1200px){
+      .panels{ display: contents; }
+      #leftScroll.parchment.scroll-with-rods,
+      #rightScroll.parchment.scroll-with-rods{ position: fixed !important; overflow: auto !important; }
+      #leftScroll{ left: 10px; right: auto; top: 80px; bottom: 80px; width: 320px; z-index: 12; }
+      #rightScroll{ right: 10px; left: auto; top: 80px; bottom: 80px; width: 320px; z-index: 12; }
+      /* restore decorative rods and inner scroll behavior on desktop */
+      .scroll-with-rods .rod, .scroll-with-rods::before, .scroll-with-rods::after{ display:block !important; }
+      .scroll-with-rods .scroll-inner{ position: absolute; top:36px; bottom:36px; left:0; right:0; overflow:auto; -webkit-overflow-scrolling: touch; padding:8px 6px; z-index:3; }
+      .parchment.scroll-with-rods{ padding-top:36px !important; padding-bottom:36px !important; }
+    }
+    @media (max-width: 420px){
+      :root{ --tube-w: 136px; --tube-h: 200px; }
+      .omikuji{ width:calc(100vw - 18px); }
+      .stage input#symbolInput{ width:clamp(160px, 70vw, 280px); }
+      #bgStatus{ display:none; } /* save space */
+    }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
 </head>
 <body>
-  <div id="pageBg" style="
-  background-image: url('/static/ComfyUI_00012_.png');
-  display: block;
-  position: fixed;
-  top: 0;
-  left: -30;
-  width: 100vw;
-  height: 100vh;
-  background-position: 66% center;
-  background-size: 110% auto;
-  background-repeat: no-repeat;
-  z-index: -1;
-"></div>
+  <div id="pageBg" class="page-bg" style="background-image: url('/static/ComfyUI_00012_.png'); display: block;"></div>
 
 
   <!-- temple removed: only tube & scrolls remain -->
@@ -327,9 +366,9 @@
   <div id="bgStatus" style="position:fixed; right:14px; top:58px; z-index:20000; padding:6px 8px; border-radius:8px; background:#fffef8; border:1px solid rgba(0,0,0,.06); font-size:12px;">背景狀態：未知</div>
 
     <button id="test" type="button" disabled>（測試）按我也會抽</button>
-    <div style="margin-top:10px; font-size:13px;">
-      <label for="symbolInput" style="font-weight:700; margin-right:6px;">公司代號：</label>
-      <input list="symbols" id="symbolInput" placeholder="例如：2330 或 AAPL" style="padding:6px; border-radius:6px; width:140px;" />
+    <div style="margin-top:10px; font-size:13px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+      <label for="symbolInput" style="font-weight:700;">公司代號：</label>
+      <input list="symbols" id="symbolInput" placeholder="例如：2330 或 AAPL" style="padding:6px; border-radius:6px; width:160px;" />
       <datalist id="symbols">
         <option value="2330">2330 (TSMC)</option>
         <option value="2317">2317 (Hon Hai)</option>
@@ -342,8 +381,9 @@
     </div>
   </div>
 
+  <div class="panels">
   <!-- Left parchment scroll: latest data (fundamentals + lag features) -->
-  <div id="leftScroll" class="parchment scroll-with-rods" style="position:fixed; left:10px; top:80px; bottom:80px; width:320px; box-sizing:border-box; z-index:12; font-size:13px; display:none;">
+  <div id="leftScroll" class="parchment scroll-with-rods" style="display:none;">
     <div class="rod rod-top" aria-hidden="true"></div>
     <div class="scroll-inner">
       <div style="font-weight:800; color:#7c2417; margin-bottom:8px;">最新資料（基本面 + 滯後特徵）</div>
@@ -356,7 +396,7 @@
    </div>
 
   <!-- Right parchment scroll: statistical inference and derivation -->
-  <div id="rightScroll" class="parchment scroll-with-rods" style="position:fixed; right:10px; top:80px; bottom:80px; width:320px; box-sizing:border-box; z-index:12; font-size:13px; display:none;">
+  <div id="rightScroll" class="parchment scroll-with-rods" style="display:none;">
     <div class="rod rod-top" aria-hidden="true"></div>
     <div class="scroll-inner">
       <div style="font-weight:800; color:#7c2417; margin-bottom:8px;">統計推論（假設檢定 / 推導）</div>
@@ -379,7 +419,8 @@
      <div class="stain s2"></div>
    <div class="fray"></div>
    <div class="fray bot"></div>
-   </div>
+  </div>
+  </div>
 
   <!-- Control panel removed. Left/Right scrolls replace the white panel visually. -->
 
@@ -837,36 +878,38 @@
       }
     })();
     // populate symbol datalist dynamically from server and refresh UI periodically
-    (async function populateSymbolsAndAutoRefresh(){
-      try{
-        const r = await fetch('/api/list_symbols');
-        if(r.ok){
-          const j = await r.json();
-          // only replace datalist when server returns a non-empty symbols array
-          if(Array.isArray(j.symbols) && j.symbols.length > 0){
-            const dl = document.getElementById('symbols');
-            if(dl){
-              dl.innerHTML = '';
-              j.symbols.forEach(s=>{
-                const o = document.createElement('option'); o.value = s.symbol; o.textContent = s.symbol; dl.appendChild(o);
-              });
+    (function symbolsLoader(){
+      async function fetchSymbols(){
+        let loaded = false;
+        try{
+          const r = await fetch('/api/list_symbols', { cache: 'no-store' });
+          if(r.ok){
+            const j = await r.json();
+            if(Array.isArray(j.symbols) && j.symbols.length > 0){
+              const dl = document.getElementById('symbols');
+              if(dl){
+                dl.innerHTML = '';
+                j.symbols.forEach(s=>{
+                  const o = document.createElement('option'); o.value = s.symbol; o.textContent = s.symbol; dl.appendChild(o);
+                });
+                loaded = true;
+              }
             }
-          } else {
-            console.warn('list_symbols returned empty — keeping existing datalist options');
+          }
+        }catch(e){ console.warn('populate symbols failed', e); }
+        // fallback or keep existing if server not loaded or returned empty
+        const dl = document.getElementById('symbols');
+        if(dl && !loaded){
+          if(dl.children.length === 0){
+            ['2330','2317','AAPL','MSFT'].forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; dl.appendChild(o); });
           }
         }
-      }catch(e){ console.warn('populate symbols failed', e); }
+      }
+      // initial attempt then a delayed retry (server冷啟用時常見)
+      fetchSymbols();
+      setTimeout(fetchSymbols, 3000);
 
-      // ensure at least some fallback static options exist so user can pick even if server fails
-      try{
-        const dl = document.getElementById('symbols');
-        if(dl && dl.children.length === 0){
-          const fallback = ['2330','2317','AAPL','MSFT'];
-          fallback.forEach(v=>{ const o = document.createElement('option'); o.value = v; o.textContent = v; dl.appendChild(o); });
-        }
-      }catch(e){ /* ignore */ }
-
-      // force-refresh latest features and lag stats every 5 minutes
+      // Keep data panels refreshed every 5 min when a symbol is selected
       const FIVE_MIN = 5 * 60 * 1000;
       setInterval(()=>{ 
         try{ 
