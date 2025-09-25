@@ -121,6 +121,25 @@ ROOT = Path(__file__).parent
 HTML = ROOT / "template2.html"
 DATA = ROOT / "data" / "short_term_with_lag3.csv"
 
+# Writable data directory (separate from read-only data/ when desired).
+def _get_write_dir() -> Path:
+    env = os.getenv("DATA_DIR_WRITE")
+    if env:
+        try:
+            p = Path(env)
+            return p
+        except Exception:
+            pass
+    return ROOT / "data_work"
+
+DATA_DIR = DATA.parent
+DATA_WRITE_DIR = _get_write_dir()
+try:
+    DATA_WRITE_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    # It's okay if we cannot create it now (e.g., read-only FS); writers will attempt later.
+    pass
+
 # serve any static assets placed in the project static/ directory (e.g. static/temple.jpg)
 STATIC_DIR = ROOT / "static"
 if not STATIC_DIR.exists():
@@ -168,9 +187,10 @@ def draw(model: str = "rf", symbol: str | None = None):
 
     try:
         # artifacts exist -> safe to call predict (it will only load & infer)
-        # If symbol is provided, let predict handle symbol-specific CSV generation
         if symbol:
-            out = predict(None, model=model, symbol=symbol)
+            # Resolve or build symbol CSV deterministically, then pass explicit path
+            csvp = _ensure_symbol_csv(symbol)
+            out = predict(str(csvp), model=model, symbol=symbol)
         else:
             out = predict(str(DATA), model=model)
         fortune = {
@@ -201,6 +221,75 @@ def draw(model: str = "rf", symbol: str | None = None):
             resp['csv'] = out.get('csv')
         return resp
     except Exception as e:
+        # Fallback: if symbol provided, attempt direct pipeline inference to avoid fragile paths
+        if symbol:
+            try:
+                csvp = _symbol_csv_path(symbol)
+                df_raw = pd.read_csv(csvp, encoding="utf-8-sig")
+                df = df_raw.copy()
+                # reconstruct X_all like stock.predict
+                df["y_final"] = pd.Series(dtype=float)
+                drop_cols = ["年月日", "y_明天漲跌", "明天收盤價", "y_final"]
+                X_all = df.drop(columns=[c for c in drop_cols if c in df.columns], errors="ignore").copy()
+                for c in X_all.columns:
+                    X_all[c] = pd.to_numeric(X_all[c], errors="coerce")
+                # load persisted pipeline + threshold
+                import joblib as _joblib
+                from sklearn.pipeline import Pipeline as _Pipeline
+                model_file = MODELS_DIR / f"{model}_pipeline.pkl"
+                thr_file = MODELS_DIR / f"{model}_threshold.pkl"
+                pipeline: _Pipeline = _joblib.load(model_file)
+                thr = _joblib.load(thr_file)
+                # infer expected features
+                expected = None
+                for step_name in ("scaler", "rf", "lr", "mdl"):
+                    if step_name in getattr(pipeline, 'named_steps', {}):
+                        step = pipeline.named_steps[step_name]
+                        if hasattr(step, 'feature_names_in_'):
+                            expected = list(step.feature_names_in_)
+                            break
+                if expected is None and hasattr(pipeline, 'feature_names_in_'):
+                    expected = list(pipeline.feature_names_in_)
+                if expected is None and hasattr(pipeline, 'n_features_in_'):
+                    n = int(pipeline.n_features_in_)
+                    numeric_cols = X_all.select_dtypes(include=[np.number]).columns.tolist()
+                    expected = numeric_cols[-n:] if n and len(numeric_cols) >= n else numeric_cols
+                # ensure expected columns exist
+                if expected:
+                    missing = [c for c in expected if c not in X_all.columns]
+                    for c in missing:
+                        X_all[c] = 0.0
+                    x_latest = X_all[expected].iloc[[-1]].fillna(X_all.median(numeric_only=True))
+                else:
+                    x_latest = X_all.tail(1).fillna(X_all.median(numeric_only=True))
+                p1 = float(pipeline.predict_proba(x_latest)[:, 1][0])
+                yhat = 1 if p1 >= float(thr) else 0
+                fortune = {
+                    "title": "預測結果",
+                    "text": [
+                        f"模型：{model}",
+                        f"預測：{'漲' if yhat==1 else '跌'}",
+                        f"預測機率：{p1*100:.2f}%",
+                    ],
+                    "label": '漲' if yhat==1 else '跌',
+                    "prob_up": p1,
+                    "threshold": float(thr),
+                    "confidence": 0.85,
+                    "advice": "此籤僅供參考，請謹慎投資"
+                }
+                return {"ok": True, "model": model, "threshold": float(thr), "proba": p1, "label": ('漲' if yhat==1 else '跌'), "fortune": fortune, "symbol": symbol, "csv": str(csvp.resolve())}
+            except Exception as e2:
+                import traceback
+                err_msg = traceback.format_exc()
+                return JSONResponse({
+                    "error": f"預測錯誤：{str(e)} | fallback 失敗：{str(e2)}",
+                    "fortune": {
+                        "title": "預測錯誤",
+                        "text": ["系統忙碌或資料錯誤，請稍後再試。"],
+                        "advice": "請重新整理或查看 log"
+                    }
+                }, status_code=500)
+        # no symbol or fallback failed
         import traceback
         err_msg = traceback.format_exc()
         return JSONResponse({
@@ -214,25 +303,44 @@ def draw(model: str = "rf", symbol: str | None = None):
 
 
 # === symbol helpers & per-symbol auto-update ===
-DATA_DIR = DATA.parent
 
 def _symbol_csv_path(symbol: str) -> Path:
+    """Preferred read path for a symbol CSV: prefer write dir copy, else read-only data dir."""
+    p_w = DATA_WRITE_DIR / f"{symbol}_short_term_with_lag3.csv"
+    if p_w.exists():
+        return p_w
     return DATA_DIR / f"{symbol}_short_term_with_lag3.csv"
+
+def _symbol_csv_write_path(symbol: str) -> Path:
+    """Where we write/refresh a symbol CSV."""
+    return DATA_WRITE_DIR / f"{symbol}_short_term_with_lag3.csv"
 
 def _ensure_symbol_csv(symbol: str) -> Path:
     """Return Path to symbol CSV; try to build it via yfinance if missing."""
-    p = _symbol_csv_path(symbol)
-    if p.exists() and p.stat().st_size > 0:
-        return p
+    # Prefer existing in write dir; else in data dir; else build into write dir
+    p_read = _symbol_csv_path(symbol)
+    if p_read.exists() and p_read.stat().st_size > 0:
+        return p_read
     # try to build using stock helper
     try:
         _ensure_yf()
-        _build_from_yfinance(symbol=symbol, out_csv=p)
-        if p.exists():
-            return p
+        p_write = _symbol_csv_write_path(symbol)
+        p_write.parent.mkdir(parents=True, exist_ok=True)
+        _build_from_yfinance(symbol=symbol, out_csv=p_write)
+        if p_write.exists():
+            # also write/update last_update timestamp alongside
+            try:
+                from datetime import datetime
+                ts_path = p_write.parent / f"{symbol}_last_update.txt"
+                with ts_path.open('w', encoding='utf-8') as f:
+                    f.write(datetime.now().isoformat())
+            except Exception:
+                pass
+            return p_write
     except Exception as e:
         raise RuntimeError(f"無法為 {symbol} 建構 CSV：{e}")
-    raise FileNotFoundError(f"Symbol CSV 仍然不存在：{p}")
+    # Fallback message if file still missing
+    raise FileNotFoundError(f"Symbol CSV 仍然不存在：{_symbol_csv_write_path(symbol)}")
 
 # manage per-symbol auto tasks
 SYMBOL_TASKS: Dict[str, asyncio.Task] = {}
@@ -240,13 +348,20 @@ SYMBOL_TASKS: Dict[str, asyncio.Task] = {}
 INDEX_TASKS: Dict[str, asyncio.Task] = {}
 
 # persistent registry file for auto symbol loops (symbol -> interval_min)
-AUTO_REG_FILE = DATA.parent / "auto_registry.json"
-INDEX_AUTO_REG_FILE = DATA.parent / "index_auto_registry.json"
+_REG_FALLBACK_DIR = DATA.parent
+_REG_DIR = DATA_WRITE_DIR if DATA_WRITE_DIR else DATA.parent
+AUTO_REG_FILE = _REG_DIR / "auto_registry.json"
+INDEX_AUTO_REG_FILE = _REG_DIR / "index_auto_registry.json"
 
 def _load_auto_registry() -> dict:
     try:
         if AUTO_REG_FILE.exists():
             with AUTO_REG_FILE.open('r', encoding='utf-8') as f:
+                return json.load(f)
+        # fallback to old location (read-only data dir)
+        fb = _REG_FALLBACK_DIR / "auto_registry.json"
+        if fb.exists():
+            with fb.open('r', encoding='utf-8') as f:
                 return json.load(f)
     except Exception:
         pass
@@ -263,6 +378,10 @@ def _load_index_auto_registry() -> dict:
     try:
         if INDEX_AUTO_REG_FILE.exists():
             with INDEX_AUTO_REG_FILE.open('r', encoding='utf-8') as f:
+                return json.load(f)
+        fb = _REG_FALLBACK_DIR / "index_auto_registry.json"
+        if fb.exists():
+            with fb.open('r', encoding='utf-8') as f:
                 return json.load(f)
     except Exception:
         pass
@@ -288,7 +407,7 @@ async def _symbol_loop(symbol: str, interval_min: int, backoff_factor: float = 2
     while True:
         success = False
         try:
-            p = _symbol_csv_path(symbol)
+            p = _symbol_csv_write_path(symbol)
             await asyncio.to_thread(lambda: (_ensure_yf(), _build_from_yfinance(symbol=symbol, out_csv=p)))
             ts_path = p.parent / f"{symbol}_last_update.txt"
             try:
@@ -353,7 +472,7 @@ async def _index_loop(index: str, interval_min: int, concurrency: int = 4, backo
             sem = asyncio.Semaphore(max(1, int(concurrency)))
             async def _build_one(sym: str):
                 async with sem:
-                    p = _symbol_csv_path(sym)
+                    p = _symbol_csv_write_path(sym)
                     try:
                         await asyncio.to_thread(lambda: (_ensure_yf(), _build_from_yfinance(symbol=sym, out_csv=p)))
                         ts_path = p.parent / f"{sym}_last_update.txt"
@@ -423,10 +542,18 @@ def build_symbols(symbols: str):
 def list_symbols():
     """List symbol CSVs present in data/ (pattern: <symbol>_short_term_with_lag3.csv)."""
     out = []
+    seen = set()
     try:
-        for p in DATA.parent.glob('*_short_term_with_lag3.csv'):
-            sym = p.stem.replace('_short_term_with_lag3', '')
-            out.append({"symbol": sym, "csv": str(p.resolve()), "size": p.stat().st_size})
+        # Prefer files from write dir, then from read-only data dir
+        for dir_ in (DATA_WRITE_DIR, DATA.parent):
+            if not dir_.exists():
+                continue
+            for p in dir_.glob('*_short_term_with_lag3.csv'):
+                sym = p.stem.replace('_short_term_with_lag3', '').upper()
+                if sym in seen:
+                    continue
+                seen.add(sym)
+                out.append({"symbol": sym, "csv": str(p.resolve()), "size": p.stat().st_size})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return {"ok": True, "count": len(out), "symbols": out}
@@ -481,7 +608,7 @@ async def _bulk_build_worker(symbols, concurrency, task_id):
         async with sem:
             try:
                 # run blocking build in thread
-                p = DATA_DIR / f"{s}_short_term_with_lag3.csv"
+                p = _symbol_csv_write_path(s)
                 await asyncio.to_thread(lambda: (_ensure_yf(), _build_from_yfinance(symbol=s, out_csv=p)))
                 BULK_TASKS[task_id]['done'] += 1
             except Exception as e:

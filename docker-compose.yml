@@ -6,9 +6,13 @@ services:
       - "8000:8000"
     volumes:
       - ./:/app:rw
-      - ./data:/app/data:rw
+      # read-only canonical data; app reads from here by default
+      - ./data:/app/data:ro
+      # writable workspace for 5-min updates to avoid dirtying Git working tree
+      - ./data_work:/app/data_work:rw
       - ./models:/app/models:rw
     environment:
       - PYTHONUNBUFFERED=1
+      - DATA_DIR_WRITE=/app/data_work
     restart: unless-stopped
     # Add health status passthrough if needed later (depends on Docker/compose version)
