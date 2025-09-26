@@ -575,3 +575,35 @@ server {
 - `web` 服務只在內部網路上 `expose: 8000`，公開的 80/443 由 `caddy` 服務對外提供。
 - `Caddyfile` 支援用 `{$DOMAIN}` 讀取環境變數，並自動配置 TLS。
 - 若你無 Public DNS（純內網），可改用自簽或在 Caddy 中加 `tls internal`（僅供測試）。
+
+---
+
+## 🔄 免費 DNS / 動態 DNS（DDNS）選項
+若你沒有自己的網域，或伺服器是動態 IP，建議使用下列其中一種：
+
+- DuckDNS（完全免費）：https://www.duckdns.org/
+  - 註冊後建立一個子網域（如 `yourname.duckdns.org`）並取得 Token。
+  - 在 `.env` 設定：
+    - `DDNS_PROVIDER=duckdns`
+    - `DUCKDNS_DOMAIN=yourname`
+    - `DUCKDNS_TOKEN=<your-token>`
+  - 啟動生產 compose 後，`ddns` 服務會每 5 分鐘自動把 A 記錄更新成目前伺服器的 Public IP。
+
+- Cloudflare（需要你擁有網域）：https://dash.cloudflare.com/
+  - 把你的網域託管到 Cloudflare，建立 API Token（權限：Zone.DNS Edit）。
+  - 在 `.env` 設定：
+    - `DDNS_PROVIDER=cloudflare`
+    - `CLOUDFLARE_API_TOKEN=<token-with-dns-edit>`
+    - `CF_ZONE_NAME=example.com`
+    - `CF_RECORD_NAME=app.example.com`
+  - `ddns` 服務會自動建立 / 更新 A 記錄，TTL=60 秒，不會開啟橘色雲（proxied=false）。
+
+啟用步驟：
+1) 填好 `.env` 的 DDNS 相關變數（見 `.env.example`）。
+2) 啟動：
+   - `docker compose -f docker-compose.prod.yml up -d`
+3) 驗證：
+   - `nslookup <你的網域>` 應回到你的伺服器 Public IP。
+   - 等待 DNS 解析生效後，Caddy 就會自動簽發 HTTPS 憑證。
+
+備註：若使用 Cloudflare，請將 A 記錄暫時關閉 Proxy（灰色雲），以便 Let’s Encrypt HTTP-01 驗證。待簽發完成再視需要開啟。

@@ -36,6 +36,24 @@ services:
     networks:
       - webnet
 
+  # Optional Dynamic DNS updater (disabled by default; enable by setting DDNS_PROVIDER in .env and running compose)
+  ddns:
+    image: python:3.11-slim
+    container_name: newproject_ddns
+    restart: unless-stopped
+    profiles: ["ddns"]
+    env_file:
+      - .env
+    working_dir: /app
+    volumes:
+      - ./scripts/ddns:/app:ro
+    command:
+      - sh
+      - -c
+      - set -e; python -m pip install -q requests; python -u ddns_updater.py
+    networks:
+      - webnet
+
 networks:
   webnet:
     driver: bridge

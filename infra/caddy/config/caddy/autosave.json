@@ -1,0 +1,1 @@
+{"apps":{"http":{"servers":{"srv0":{"listen":[":443"],"routes":[{"handle":[{"handler":"subroute","routes":[{"handle":[{"encodings":{"gzip":{},"zstd":{}},"handler":"encode","prefer":["zstd","gzip"]},{"handler":"reverse_proxy","upstreams":[{"dial":"web:8000"}]}]}]}],"match":[{"host":["fortuneticker.duckdns.org"]}],"terminal":true}]}}}}}
