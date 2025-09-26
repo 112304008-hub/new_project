@@ -78,6 +78,10 @@ models/
 # Sensitive files
 secrets.env
 
+# Caddy runtime (certs, locks, cache) — do not track
+infra/caddy/data/
+infra/caddy/config/
+
 ## --- Project specific (DISABLED to allow committing data) ---
 # data/*_last_update.txt
 # data/*_summary.json
