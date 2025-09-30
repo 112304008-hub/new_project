@@ -1,7 +1,13 @@
 import os
+import sys
 from pathlib import Path
 import pandas as pd
 import pytest
+
+# Ensure project root is importable (so `import main` works when running pytest from repo root)
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 # FastAPI test client
 from fastapi.testclient import TestClient
