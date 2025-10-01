@@ -857,6 +857,10 @@ def diagnostics(n_bins: int = 20):
     except Exception as e:
         return JSONResponse({"error": f"讀取 CSV 失敗：{str(e)}"}, status_code=500)
 
+    # Treat empty/invalid CSV as server-side data error for diagnostics
+    if df.shape[0] == 0:
+        return JSONResponse({"error": "CSV 沒有資料或格式無效"}, status_code=500)
+
     numeric = df.select_dtypes(include=[np.number])
     stats = {}
     for col in numeric.columns:
