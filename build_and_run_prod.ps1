@@ -61,11 +61,11 @@ for ($i = 1; $i -le $maxAttempts; $i++) {
       break
     }
     else {
-      Write-Host "Attempt #$i: HTTP $($resp.StatusCode) — retrying..."
+      Write-Host "Attempt #${i}: HTTP $($resp.StatusCode) — retrying..."
     }
   }
   catch {
-    Write-Host "Attempt #$i: waiting for Caddy/web to be ready..."
+    Write-Host "Attempt #${i}: waiting for Caddy/web to be ready..."
   }
   Start-Sleep -Seconds 3
 }
