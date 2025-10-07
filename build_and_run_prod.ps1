@@ -66,9 +66,15 @@ $maxAttempts = 20
 $ok = $false
 for ($i = 1; $i -le $maxAttempts; $i++) {
   try {
-    $healthUrl = if (Test-Path ${composeOverride}) { 'http://localhost:8080/health' } else { 'http://localhost/health' }
-    Write-Host "Health URL: $healthUrl (Host=$domain)" -ForegroundColor DarkCyan
-    $resp = Invoke-WebRequest -Uri $healthUrl -Headers @{ Host = $domain } -UseBasicParsing -TimeoutSec 5
+    if (Test-Path ${composeOverride}) {
+      $healthUrl = 'http://localhost:8080/health'
+      $hostHeader = 'localhost'
+    } else {
+      $healthUrl = 'http://localhost/health'
+      $hostHeader = $domain
+    }
+    Write-Host "Health URL: $healthUrl (Host=$hostHeader)" -ForegroundColor DarkCyan
+    $resp = Invoke-WebRequest -Uri $healthUrl -Headers @{ Host = $hostHeader } -UseBasicParsing -TimeoutSec 5
     if ($resp.StatusCode -eq 200) {
       Write-Host "Health OK (attempt #$i)" -ForegroundColor Green
       Write-Host $resp.Content
