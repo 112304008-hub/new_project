@@ -36,11 +36,43 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Compose up failed"; exit 1 }
 
 Start-Sleep -Seconds 3
 Write-Host "==> Health check" -ForegroundColor Cyan
-try {
-  $resp = Invoke-WebRequest -Uri http://localhost:8000/health -UseBasicParsing -TimeoutSec 5
-  Write-Host $resp.Content
-} catch {
-  Write-Warning "Health check failed: $_"
+# Since web is only exposed within the compose network (expose: 8000),
+# check via Caddy on localhost:80 with Host header = DOMAIN. Retry for up to ~60s.
+$domain = $env:DOMAIN
+if (-not $domain) {
+  $envFile = Join-Path $PSScriptRoot '.env'
+  if (Test-Path $envFile) {
+    foreach ($line in Get-Content $envFile) {
+      if ($line -match '^\s*DOMAIN\s*=\s*(.+)$') { $domain = $matches[1].Trim(); break }
+    }
+  }
+}
+if (-not $domain) { $domain = 'localhost' }
+
+$maxAttempts = 20
+$ok = $false
+for ($i = 1; $i -le $maxAttempts; $i++) {
+  try {
+    $resp = Invoke-WebRequest -Uri http://localhost/health -Headers @{ Host = $domain } -UseBasicParsing -TimeoutSec 5
+    if ($resp.StatusCode -eq 200) {
+      Write-Host "Health OK (attempt #$i)" -ForegroundColor Green
+      Write-Host $resp.Content
+      $ok = $true
+      break
+    }
+    else {
+      Write-Host "Attempt #$i: HTTP $($resp.StatusCode) — retrying..."
+    }
+  }
+  catch {
+    Write-Host "Attempt #$i: waiting for Caddy/web to be ready..."
+  }
+  Start-Sleep -Seconds 3
+}
+
+if (-not $ok) {
+  Write-Warning "Health check failed via Caddy (Host=$domain). Containers may still be starting or port 80 may be blocked."
+  Write-Warning "Tips: ensure Docker Desktop is running and port 80/443 are free (IIS/Hyper-V off)."
   exit 1
 }
 
