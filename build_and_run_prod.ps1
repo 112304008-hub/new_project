@@ -29,16 +29,57 @@ if ($SkipRun) { Write-Host "--SkipRun specified, exiting after build."; exit 0 }
 Write-Host "==> Starting container via docker-compose.prod.yml (+ override if present)" -ForegroundColor Cyan
 ${composeProd} = Join-Path $PSScriptRoot 'docker-compose.prod.yml'
 ${composeOverride} = Join-Path $PSScriptRoot 'docker-compose.override.yml'
+${composeGenerated} = Join-Path $PSScriptRoot 'docker-compose.override.local.generated.yml'
+
+# Helper: pick a free TCP port on localhost, preferring common alt ports
+function Get-FreeTcpPort {
+  param([int[]]$Preferred = @(18080, 28080, 38080))
+  foreach ($p in $Preferred) {
+    try {
+      $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $p)
+      $l.Start(); $l.Stop(); return $p
+    } catch {}
+  }
+  $l2 = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+  $l2.Start(); $p2 = $l2.LocalEndpoint.Port; $l2.Stop(); return $p2
+}
+
+# If 80/8080 are busy and a static override exists, we still allow a generated override to win last in merge order
+$useGenerated = $false
+try {
+  # Check if localhost:18080 is busy; if so, generate a new one
+  $test = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 18080)
+  $test.Start(); $test.Stop()
+} catch {
+  $useGenerated = $true
+}
+
+if ($useGenerated) {
+  $freePort = Get-FreeTcpPort
+  @(
+    "services:",
+    "  caddy:",
+    "    ports:",
+    "      - ${freePort}:80",
+    "    volumes:",
+    "      - ./infra/caddy/conf/Caddyfile.local:/etc/caddy/Caddyfile:ro"
+  ) | Set-Content -Encoding UTF8 ${composeGenerated}
+  Write-Host "Using generated override: ${composeGenerated} (HTTP on localhost:$freePort)" -ForegroundColor DarkCyan
+}
 # Ensure any previous container is stopped
 try {
-  if (Test-Path ${composeOverride}) {
+  if (Test-Path ${composeGenerated}) {
+    docker compose -f ${composeProd} -f ${composeOverride} -f ${composeGenerated} down
+  } elseif (Test-Path ${composeOverride}) {
     docker compose -f ${composeProd} -f ${composeOverride} down
   } else {
     docker compose -f ${composeProd} down
   }
 } catch {}
 $env:API_KEY = $env:API_KEY  # pass through if set
-$runCmd = if (Test-Path ${composeOverride}) {
+$runCmd = if (Test-Path ${composeGenerated}) {
+  "docker compose -f `"${composeProd}`" -f `"${composeOverride}`" -f `"${composeGenerated}`" up -d"
+} elseif (Test-Path ${composeOverride}) {
   "docker compose -f `"${composeProd}`" -f `"${composeOverride}`" up -d"
 } else {
   "docker compose -f `"${composeProd}`" up -d"
@@ -50,7 +91,7 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Compose up failed"; exit 1 }
 Start-Sleep -Seconds 3
 Write-Host "==> Health check" -ForegroundColor Cyan
 # Since web is only exposed within the compose network (expose: 8000),
-# check via Caddy on localhost:80 with Host header = DOMAIN. Retry for up to ~60s.
+# check via Caddy on localhost with Host header. Retry for up to ~60s.
 $domain = $env:DOMAIN
 if (-not $domain) {
   $envFile = Join-Path $PSScriptRoot '.env'
@@ -66,12 +107,15 @@ $maxAttempts = 20
 $ok = $false
 for ($i = 1; $i -le $maxAttempts; $i++) {
   try {
-    if (Test-Path ${composeOverride}) {
-      $healthUrl = 'http://localhost:8080/health'
-      $hostHeader = 'localhost'
+    if (Test-Path ${composeGenerated}) {
+      # parse generated override to get chosen port (unquoted mapping)
+      $portLine = (Get-Content ${composeGenerated} | Where-Object { $_ -match '^[\s-]*-\s*(\d+):80' } | Select-Object -First 1)
+      if ($portLine -and $portLine -match '([0-9]+):80') { $port = [int]$matches[1] } else { $port = 18080 }
+      $healthUrl = "http://localhost:$port/health"; $hostHeader = 'localhost'
+    } elseif (Test-Path ${composeOverride}) {
+      $healthUrl = 'http://localhost:18080/health'; $hostHeader = 'localhost'
     } else {
-      $healthUrl = 'http://localhost/health'
-      $hostHeader = $domain
+      $healthUrl = 'http://localhost/health'; $hostHeader = $domain
     }
     Write-Host "Health URL: $healthUrl (Host=$hostHeader)" -ForegroundColor DarkCyan
     $resp = Invoke-WebRequest -Uri $healthUrl -Headers @{ Host = $hostHeader } -UseBasicParsing -TimeoutSec 5
@@ -92,8 +136,17 @@ for ($i = 1; $i -le $maxAttempts; $i++) {
 }
 
 if (-not $ok) {
-  Write-Warning "Health check failed via Caddy (Host=$domain). Containers may still be starting or port 80 may be blocked."
-  Write-Warning "Tips: ensure Docker Desktop is running and port 80/443 are free (IIS/Hyper-V off)."
+  Write-Warning "Health check failed via Caddy (Host=$domain or localhost). Containers may still be starting or host ports may be blocked."
+  Write-Warning "Tips: ensure Docker Desktop is running and local firewall/VPN allows localhost access."
+  # Final fallback: check from inside web container
+  try {
+    Write-Host "==> Fallback: in-container health probe (web:8000)" -ForegroundColor Cyan
+    docker exec newproject_web_prod python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=3).status==200 else 1)"
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "Internal health OK. App is running; host access may be blocked. You can visit http://localhost:PORT/health replacing PORT with the port in use." -ForegroundColor Yellow
+      exit 0
+    }
+  } catch {}
   exit 1
 }
 

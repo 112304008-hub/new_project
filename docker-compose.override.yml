@@ -1,7 +1,7 @@
 services:
   caddy:
     ports:
-      - "8080:80"
-      - "8443:443"
+      - "18080:80"
+      - "18443:443"
     volumes:
       - ./infra/caddy/conf/Caddyfile.local:/etc/caddy/Caddyfile:ro

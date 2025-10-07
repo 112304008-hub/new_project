@@ -101,3 +101,6 @@ infra/caddy/config/
 logs/
 *.tmp
 
+# Generated local override for Caddy (auto-picked ports)
+docker-compose.override.local.generated.yml
+
