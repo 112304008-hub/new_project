@@ -8,8 +8,9 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $repoRoot '.env'
-$pythonExe = Join-Path $repoRoot '.venv' 'Scripts' 'python.exe'
-$ddnsPy = Join-Path $repoRoot 'scripts' 'ddns' 'ddns_updater.py'
+# Build paths in a PS 5.1-compatible way (Join-Path supports only -Path and -ChildPath)
+$pythonExe = Join-Path (Join-Path (Join-Path $repoRoot '.venv') 'Scripts') 'python.exe'
+$ddnsPy = Join-Path (Join-Path (Join-Path $repoRoot 'scripts') 'ddns') 'ddns_updater.py'
 
 if (-not (Test-Path $envFile)) { throw ".env not found at $envFile" }
 if (-not (Test-Path $pythonExe)) { throw "Python venv not found at $pythonExe. Run scripts/Setup-Env.ps1 first." }
