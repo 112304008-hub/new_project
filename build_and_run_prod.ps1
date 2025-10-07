@@ -27,20 +27,23 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Build failed"; exit 1 }
 if ($SkipRun) { Write-Host "--SkipRun specified, exiting after build."; exit 0 }
 
 Write-Host "==> Starting container via docker-compose.prod.yml (+ override if present)" -ForegroundColor Cyan
+${composeProd} = Join-Path $PSScriptRoot 'docker-compose.prod.yml'
+${composeOverride} = Join-Path $PSScriptRoot 'docker-compose.override.yml'
 # Ensure any previous container is stopped
 try {
-  if (Test-Path "docker-compose.override.yml") {
-    docker compose -f docker-compose.prod.yml -f docker-compose.override.yml down
+  if (Test-Path ${composeOverride}) {
+    docker compose -f ${composeProd} -f ${composeOverride} down
   } else {
-    docker compose -f docker-compose.prod.yml down
+    docker compose -f ${composeProd} down
   }
 } catch {}
 $env:API_KEY = $env:API_KEY  # pass through if set
-$runCmd = if (Test-Path "docker-compose.override.yml") {
-  "docker compose -f docker-compose.prod.yml -f docker-compose.override.yml up -d"
+$runCmd = if (Test-Path ${composeOverride}) {
+  "docker compose -f `"${composeProd}`" -f `"${composeOverride}`" up -d"
 } else {
-  "docker compose -f docker-compose.prod.yml up -d"
+  "docker compose -f `"${composeProd}`" up -d"
 }
+Write-Host "Run: $runCmd" -ForegroundColor DarkCyan
 Invoke-Expression $runCmd
 if ($LASTEXITCODE -ne 0) { Write-Error "Compose up failed"; exit 1 }
 
@@ -63,7 +66,8 @@ $maxAttempts = 20
 $ok = $false
 for ($i = 1; $i -le $maxAttempts; $i++) {
   try {
-    $healthUrl = if (Test-Path "docker-compose.override.yml") { 'http://localhost:8080/health' } else { 'http://localhost/health' }
+    $healthUrl = if (Test-Path ${composeOverride}) { 'http://localhost:8080/health' } else { 'http://localhost/health' }
+    Write-Host "Health URL: $healthUrl (Host=$domain)" -ForegroundColor DarkCyan
     $resp = Invoke-WebRequest -Uri $healthUrl -Headers @{ Host = $domain } -UseBasicParsing -TimeoutSec 5
     if ($resp.StatusCode -eq 200) {
       Write-Host "Health OK (attempt #$i)" -ForegroundColor Green
