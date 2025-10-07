@@ -69,3 +69,14 @@ volumes: {}
 # 3) Create a .env with DOMAIN=your.domain.com and ACME_EMAIL=you@example.com
 # 4) Run: docker compose -f docker-compose.prod.yml up -d
 # 5) Verify: https://<your domain>/health
+
+# DDNS (DuckDNS/Cloudflare) notes:
+# - DDNS service runs only if you specify --profile ddns, e.g.:
+#     docker compose -f docker-compose.prod.yml --profile ddns up -d
+# - To force a fixed IP (no auto-detection), set in .env:
+#     DDNS_PROVIDER=duckdns
+#     DUCKDNS_DOMAIN=your-subdomain
+#     DUCKDNS_TOKEN=your-token
+#     DDNS_STATIC_IP=1.2.3.4   # your fixed public IP
+#     DDNS_ONESHOT=true         # optional: run once then exit
+# - If you don't need DDNS at all (your IP is static and DNS A record is fixed), just do not use the ddns profile.

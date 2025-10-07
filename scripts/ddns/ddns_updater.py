@@ -2,8 +2,20 @@ import os
 import time
 import json
 from typing import Optional
+import re
 
 import requests
+
+
+def is_valid_ipv4(ip: str) -> bool:
+    # Basic IPv4 validation
+    if not ip or len(ip) > 15:
+        return False
+    m = re.match(r"^(?:\d{1,3}\.){3}\d{1,3}$", ip)
+    if not m:
+        return False
+    parts = ip.split('.')
+    return all(0 <= int(p) <= 255 for p in parts)
 
 
 def get_public_ipv4(timeout: float = 5.0) -> Optional[str]:
@@ -12,7 +24,7 @@ def get_public_ipv4(timeout: float = 5.0) -> Optional[str]:
         if r.ok:
             ip = r.text.strip()
             # very basic sanity
-            if ip and 6 <= len(ip) <= 45:
+            if is_valid_ipv4(ip):
                 return ip
     except Exception:
         pass
@@ -119,25 +131,34 @@ def update_cloudflare(api_token: str, zone_name: str, record_name: str, ip: str)
 def main():
     provider = (os.getenv("DDNS_PROVIDER") or "").strip().lower()
     interval = int(os.getenv("DDNS_INTERVAL_SECONDS", "300") or 300)
+    static_ip = (os.getenv("DDNS_STATIC_IP") or "").strip()
+    oneshot = (os.getenv("DDNS_ONESHOT") or "").strip().lower() in {"1", "true", "yes"}
 
     if provider not in {"duckdns", "cloudflare"}:
         print("ddns: DDNS_PROVIDER not set (duckdns|cloudflare); exiting")
         return
 
     last_ip: Optional[str] = None
-    print(f"ddns: starting provider={provider} interval={interval}s")
+    mode = f"static_ip={static_ip}" if static_ip else "auto-detect"
+    print(f"ddns: starting provider={provider} interval={interval}s mode={mode} oneshot={oneshot}")
 
     while True:
-        ip = get_public_ipv4()
+        ip = static_ip if static_ip else get_public_ipv4()
         if not ip:
             print("ddns: unable to determine public IPv4; retrying later")
-            time.sleep(interval)
-            continue
+            if oneshot:
+                return
+            else:
+                time.sleep(interval)
+                continue
 
         if ip == last_ip:
             print(f"ddns: ip unchanged {ip}; skipping update")
-            time.sleep(interval)
-            continue
+            if oneshot:
+                return
+            else:
+                time.sleep(interval)
+                continue
 
         ok = False
         if provider == "duckdns":
@@ -159,8 +180,12 @@ def main():
         if ok:
             last_ip = ip
             print(f"ddns: updated {provider} record to {ip}")
+            if oneshot:
+                return
         else:
             print("ddns: update failed; will retry next interval")
+            if oneshot:
+                return
 
         time.sleep(interval)
 
