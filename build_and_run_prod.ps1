@@ -26,11 +26,21 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Build failed"; exit 1 }
 
 if ($SkipRun) { Write-Host "--SkipRun specified, exiting after build."; exit 0 }
 
-Write-Host "==> Starting container via docker-compose.prod.yml" -ForegroundColor Cyan
+Write-Host "==> Starting container via docker-compose.prod.yml (+ override if present)" -ForegroundColor Cyan
 # Ensure any previous container is stopped
-try { docker compose -f docker-compose.prod.yml down } catch {}
+try {
+  if (Test-Path "docker-compose.override.yml") {
+    docker compose -f docker-compose.prod.yml -f docker-compose.override.yml down
+  } else {
+    docker compose -f docker-compose.prod.yml down
+  }
+} catch {}
 $env:API_KEY = $env:API_KEY  # pass through if set
-$runCmd = "docker compose -f docker-compose.prod.yml up -d"
+$runCmd = if (Test-Path "docker-compose.override.yml") {
+  "docker compose -f docker-compose.prod.yml -f docker-compose.override.yml up -d"
+} else {
+  "docker compose -f docker-compose.prod.yml up -d"
+}
 Invoke-Expression $runCmd
 if ($LASTEXITCODE -ne 0) { Write-Error "Compose up failed"; exit 1 }
 
@@ -53,7 +63,8 @@ $maxAttempts = 20
 $ok = $false
 for ($i = 1; $i -le $maxAttempts; $i++) {
   try {
-    $resp = Invoke-WebRequest -Uri http://localhost/health -Headers @{ Host = $domain } -UseBasicParsing -TimeoutSec 5
+    $healthUrl = if (Test-Path "docker-compose.override.yml") { 'http://localhost:8080/health' } else { 'http://localhost/health' }
+    $resp = Invoke-WebRequest -Uri $healthUrl -Headers @{ Host = $domain } -UseBasicParsing -TimeoutSec 5
     if ($resp.StatusCode -eq 200) {
       Write-Host "Health OK (attempt #$i)" -ForegroundColor Green
       Write-Host $resp.Content
