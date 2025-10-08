@@ -4,7 +4,7 @@ services:
       - "18080:80"
       - "18443:443"
     volumes:
-      - ./infra/caddy/conf/Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - ../caddy/conf/Caddyfile.local:/etc/caddy/Caddyfile:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost/health"]
       interval: 30s

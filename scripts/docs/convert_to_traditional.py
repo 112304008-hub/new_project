@@ -14,16 +14,13 @@ from pathlib import Path
 from typing import Iterable, Tuple
 
 try:
-    # opencc-python-reimplemented 提供純 Python 實作，較易於跨平台安裝
     from opencc import OpenCC  # type: ignore
     _OPENCC_AVAILABLE = True
 except Exception:
     OpenCC = None  # type: ignore
     _OPENCC_AVAILABLE = False
 
-# 簡體到繁體的常用映射表（擴展版）
 CONVERSION_MAP = {
-    # 基礎字詞
     '项目': '專案', '简介': '簡介', '构建': '建構', '预测': '預測', '系统': '系統',
     '提供': '提供', '数据': '資料', '采集': '採集', '特征': '特徵', '工程': '工程',
     '模型': '模型', '训练': '訓練', '推理': '推理', '完整': '完整', '解决': '解決',
@@ -33,38 +30,23 @@ CONVERSION_MAP = {
     '机器': '機器', '学习': '學習', '算法': '演算法', '数值': '數值', '计算': '計算',
     '科学': '科學', '统计': '統計', '建模': '建模', '监控': '監控', '观测': '可觀測',
     '性': '性', '容器': '容器', '测试': '測試', '单元': '單元', '集成': '整合',
-    
-    # 架構相關
     '架构': '架構', '概览': '概覽', '层': '層', '逻辑': '邏輯', '持久': '持久',
     '分': '分', '设计': '設計', '决策': '決策', '部署': '部署', '扩展': '擴展',
-    
-    # 數據相關
-    '数据': '資料', '模型': '模型', '实体': '實體', '定义': '定義', '字段': '欄位',
-    '关联': '關聯', '关系': '關係', '格式': '格式', '文件': '檔案', '生命': '生命',
+    '数据': '資料', '实体': '實體', '定义': '定義', '字段': '欄位', '关联': '關聯',
+    '关系': '關係', '格式': '格式', '文件': '檔案', '生命': '生命',
     '周期': '週期', '质量': '品質', '验证': '驗證', '规则': '規則',
-    
-    # 業務相關
-    '业务': '業務', '规则': '規則', '边界': '邊界', '条件': '條件', '约束': '約束',
+    '业务': '業務', '边界': '邊界', '条件': '條件', '约束': '約束',
     '流程': '流程', '策略': '策略',
-    
-    # 術語相關
     '术语': '術語', '词汇': '詞彙', '编码': '編碼', '规范': '規範', '命名': '命名',
     '约定': '約定', '注释': '註釋',
-    
-    # 開發相關
-    '开发': '開發', '规范': '規範', '代码': '程式碼', '风格': '風格', '异常': '例外',
-    '处理': '處理', '要求': '要求', '测试': '測試', '覆盖': '覆蓋', '率': '率',
-    
-    # 常見問題
-    '常见': '常見', '问题': '問題', '安装': '安裝', '环境': '環境', '失败': '失敗',
-    '错误': '錯誤', '解决': '解決', '诊断': '診斷', '方法': '方法',
-    
-    # 其他常用詞
+    '开发': '開發', '代码': '程式碼', '风格': '風格', '异常': '例外',
+    '覆盖': '覆蓋', '率': '率',
+    '常见': '常見', '问题': '問題', '安装': '安裝', '失败': '失敗',
+    '错误': '錯誤', '诊断': '診斷', '方法': '方法',
     '功能': '功能', '核心': '核心', '说明': '說明', '配置': '配置', '参数': '參數',
-    '响应': '回應', '请求': '請求', '状态': '狀態', '错误': '錯誤', '成功': '成功',
+    '响应': '回應', '请求': '請求', '状态': '狀態', '成功': '成功',
     '示例': '範例', '使用': '使用', '场景': '場景', '建议': '建議', '注意': '注意',
-    '事项': '事項', '步骤': '步驟', '检查': '檢查', '确认': '確認', '验证': '驗證',
-    '启动': '啟動', '停止': '停止', '查询': '查詢', '返回': '回傳', '输入': '輸入',
+    '事项': '事項', '步骤': '步驟', '检查': '檢查', '确认': '確認', '输入': '輸入',
     '输出': '輸出', '类型': '類型', '对象': '物件', '变量': '變數', '函数': '函式',
     '默认': '預設', '值': '值', '选项': '選項', '可选': '可選', '必需': '必需',
     '原因': '原因', '症状': '症狀', '排查': '排查', '修复': '修復', '优化': '最佳化',
@@ -84,40 +66,30 @@ CONVERSION_MAP = {
     '私有': '私有', '保护': '保護', '抽象': '抽象', '具体': '具體', '泛型': '泛型',
 }
 
-# 可處理的預設文字副檔名（仍會以實際能否以 UTF-8 讀取為準）
 TEXT_EXTS = {
     '.md', '.markdown', '.txt', '.rst', '.html', '.htm', '.xml', '.json', '.yml', '.yaml', '.csv', '.ini', '.cfg'
 }
 
 def _get_converter():
-    """取得轉換器，OpenCC 優先，否則使用字典替換。"""
     if _OPENCC_AVAILABLE:
         try:
-            return OpenCC('s2t')  # 簡體到繁體
+            return OpenCC('s2t')
         except Exception:
             pass
-    # 回退：以簡單字典替換
     class _DictConv:
         def convert(self, s: str) -> str:
             result = s
             for simp, trad in CONVERSION_MAP.items():
                 result = result.replace(simp, trad)
             return result
-
     return _DictConv()
 
-
 def is_text_file(path: Path) -> bool:
-    """粗略判斷是否為文字檔：
-    - 副檔名在 TEXT_EXTS 中快速通過
-    - 否則嘗試讀取小塊 bytes 並以 UTF-8 解碼
-    """
     if path.suffix.lower() in TEXT_EXTS:
         return True
     try:
         with open(path, 'rb') as f:
             chunk = f.read(4096)
-        # 如果包含大量 NUL 或無法解碼，多半是二進位
         if b"\x00" in chunk:
             return False
         chunk.decode('utf-8')
@@ -125,13 +97,10 @@ def is_text_file(path: Path) -> bool:
     except Exception:
         return False
 
-
 def convert_content(content: str, converter) -> str:
-    """將內容從簡體轉換為繁體。"""
     return converter.convert(content)
 
 def process_file(file_path: Path, converter) -> bool:
-    """處理單個檔案，回傳是否成功。"""
     rel = file_path
     print(f"處理內容: {rel}")
     try:
@@ -153,24 +122,16 @@ def process_file(file_path: Path, converter) -> bool:
         print(f"✗ 內容錯誤 {file_path.name}: {e}")
         return False
 
-
 def convert_name(name: str, converter) -> str:
-    """將檔名/資料夾名（不含副檔名變更）轉為繁體。"""
-    # 只處理 base 名稱的中文，副檔名（如 .md）保持不變
     stem, suffix = os.path.splitext(name)
     new_stem = converter.convert(stem)
     return f"{new_stem}{suffix}"
 
-
-def safe_rename(src: Path, dst: Path) -> Tuple[bool, Path]:
-    """安全改名：若目標存在則加上 _trad 避免覆蓋。
-    回傳 (是否改名, 最終路徑)
-    """
+def safe_rename(src: Path, dst: Path):
     if src == dst:
         return False, src
     final_dst = dst
     if final_dst.exists():
-        # 若已存在且不是同一路徑，嘗試加後綴
         parent = dst.parent
         stem, suffix = os.path.splitext(dst.name)
         i = 1
@@ -186,8 +147,7 @@ def safe_rename(src: Path, dst: Path) -> Tuple[bool, Path]:
         return False, src
 
 def main():
-    """主函式"""
-    docs_dir = Path(__file__).parent / 'docs'
+    docs_dir = Path(__file__).resolve().parents[2] / 'docs'
     if not docs_dir.exists():
         print(f"錯誤: docs 目錄不存在: {docs_dir}")
         return
@@ -210,7 +170,6 @@ def main():
     print("=" * 60)
     print(f"內容處理完成：{changed_files}/{total_files} 個檔案已處理或確認為文字檔")
 
-    # 檔名與資料夾改名（先檔案、再資料夾；資料夾自底向上）
     print("開始重新命名檔案…")
     renamed_files = 0
     for root, dirs, files in os.walk(docs_dir):

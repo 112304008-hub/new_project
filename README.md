@@ -66,11 +66,11 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ### 方式二：Docker 部署（推薦生產環境）
 
 ```powershell
-# 1. 建置映像
-docker compose build
+# 1. 建置映像（從專案根目錄）
+docker compose -f infra/compose/docker-compose.yml build
 
-# 2. 啟動服務
-docker compose up -d
+# 2. 啟動服務（開發）
+docker compose -f infra/compose/docker-compose.yml up -d
 
 # 3. 檢查狀態
 docker ps
@@ -84,7 +84,7 @@ echo "DOMAIN=your-domain.com" > .env
 echo "ACME_EMAIL=your@email.com" >> .env
 
 # 啟動（自動取得 Let's Encrypt 憑證）
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f infra/compose/docker-compose.prod.yml up -d
 ```
 
 ---
@@ -93,26 +93,47 @@ docker compose -f docker-compose.prod.yml up -d
 
 ```
 new-project/
-├── 📄 README.md              # 本檔案
-├── 📁 docs/                  # 完整技術文檔
-│   ├── README.md            # 文檔導航
+├── 📄 README.md
+├── 📁 docs/
 │   ├── 01_架構概覽.md
 │   ├── 02_資料模型.md
 │   ├── 03_業務規則.md
 │   ├── 04_術語詞彙.md
 │   ├── 05_開發規範.md
 │   └── 06_常見問題.md
-├── 🐍 main.py               # FastAPI 應用入口
-├── 🐍 stock.py              # 資料處理與模型邏輯
-├── 🐍 test.py               # 測試腳本
-├── 📁 tests/                # 測試套件
-├── 📁 data/                 # 資料 CSV 與 registry
-├── 📁 models/               # 訓練好的模型檔案
-├── 📁 static/               # 靜態資源
-├── 🐳 Dockerfile            # Docker 映像定義
-├── 🐳 docker-compose.yml    # 開發環境配置
-├── 🐳 docker-compose.prod.yml  # 生產環境配置
-└── 📦 requirements.txt      # Python 依賴
+├── 📁 scripts/               # 開發、批次與工具腳本
+│   ├── Build-And-Run-Prod.ps1
+│   ├── Setup-Env.ps1
+│   ├── Run-DDNS.ps1
+│   ├── batch/
+│   │   ├── fetch_sp500_github.py
+│   │   ├── fetch_tech_and_start.py
+│   │   ├── start_first50.py
+│   │   ├── start_next50.py
+│   │   ├── start_and_monitor_batch3.py
+│   │   └── start_and_monitor_batch4.py
+│   ├── dev/
+│   │   ├── run_api_smoke.py
+│   │   ├── run_bulk_build.py
+│   │   ├── run_bulk_task_test.py
+│   │   ├── run_predict.py
+│   │   └── run_test_bulk.py
+│   ├── docs/
+│   │   └── convert_to_traditional.py
+│   └── tools/
+│       └── check_twelve.py
+├── 🐍 main.py                # FastAPI 應用入口
+├── 🐍 stock.py               # 資料處理與模型邏輯
+├── 🐍 test.py                # 輕量工具/範例腳本（legacy）
+├── 📁 tests/                 # 測試套件
+├── 📁 data/                  # 資料 CSV 與 registry
+├── 📁 models/                # 訓練好的模型檔案
+├── 📁 static/                # 靜態資源
+├── 🐳 Dockerfile             # Docker 映像定義
+├── 🐳 docker-compose.yml     # 開發環境配置
+├── 🐳 docker-compose.prod.yml  # 生產環境配置（Caddy + HTTPS）
+├── 🐳 docker-compose.override.yml  # 本機疊加（可選）
+└── 📦 requirements.txt       # Python 依賴
 ```
 
 ---
@@ -405,7 +426,7 @@ Made with ❤️ by the development team
   - `ACME_EMAIL=you@example.com`
   - 可選擇加入 `API_KEY` 與其他變數。
 4) 啟動：
-  - `docker compose -f docker-compose.prod.yml up -d`
+  - `docker compose -f infra/compose/docker-compose.prod.yml up -d`
   - Caddy 設定檔：`infra/caddy/conf/Caddyfile`
   - Caddy 憑證/設定資料：`infra/caddy/data`, `infra/caddy/config`
 5) 驗證：
@@ -441,7 +462,7 @@ Made with ❤️ by the development team
 啟用步驟：
 1) 填好 `.env` 的 DDNS 相關變數（見 `.env.example`）。
 2) 啟動：
-   - `docker compose -f docker-compose.prod.yml up -d`
+  - `docker compose -f infra/compose/docker-compose.prod.yml up -d`
 3) 驗證：
    - `nslookup <你的網域>` 應回到你的伺服器 Public IP。
    - 等待 DNS 解析生效後，Caddy 就會自動簽發 HTTPS 憑證。
@@ -476,15 +497,45 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 
 ---
 
-## 🈶️ 簡體轉繁體工具（docs/）
+## 🧪 常用工具腳本（模組方式）
 
-使用 `convert_to_traditional.py` 遞迴將 `docs/` 下的所有可讀文字檔與其名稱轉為繁體（預設使用 OpenCC）：
+專案已將零散腳本整併到 `scripts/` 目錄，建議用 `python -m` 從專案根目錄執行：
 
 ```powershell
-C:/Users/runyu/OneDrive/桌面/new-project/.venv/Scripts/python.exe convert_to_traditional.py
+# 單股預測（以 AAPL 為例；支援 --model rf|lr）
+python -m scripts.dev.run_predict --symbol AAPL --model rf
+
+# API 冒煙測試
+python -m scripts.dev.run_api_smoke
+
+# 啟動 S&P 500 批次建置（第一批）
+python -m scripts.batch.start_first50
+
+# 抓取 GitHub 上的 S&P 500 清單並啟動批次
+python -m scripts.batch.fetch_sp500_github
+```
+
+也可直接以檔案路徑執行，例如：`python .\scripts\dev\run_predict.py`。
+
+---
+
+## 🈶️ 簡體轉繁體工具（docs/）
+
+使用 `scripts/docs/convert_to_traditional.py` 遞迴將 `docs/` 下的所有可讀文字檔與其名稱轉為繁體（預設使用 OpenCC）。建議使用模組方式執行，確保相對路徑正確：
+
+```powershell
+# 從專案根目錄執行
+python -m scripts.docs.convert_to_traditional
 ```
 
 轉換結果會列在終端輸出，若發現名稱衝突，腳本會在新名稱後加上 `_trad` 以避免覆蓋。
+
+若你偏好直接執行檔案，也可：
+```powershell
+python .\scripts\docs\convert_to_traditional.py
+```
+
+兩種方式等效。
 
 ---
 

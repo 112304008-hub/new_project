@@ -4,7 +4,7 @@ Writes summary to data/bulk_task_<task_id>_summary.json
 """
 import time
 import requests
-from fetch_sp500_github import URL
+from .fetch_sp500_github import URL  # reuse URL constant
 from main import bulk_build_start, BULK_TASKS, DATA_DIR
 from pathlib import Path
 import json

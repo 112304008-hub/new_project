@@ -58,7 +58,7 @@ if __name__ == '__main__':
         print('No tech tickers found; aborting')
         raise SystemExit(1)
     print('Starting local build for tech symbols, count=', len(syms))
-    out_dir = Path(__file__).parent / 'data'
+    out_dir = Path(__file__).parent.parent / 'data'
     out_dir.mkdir(parents=True, exist_ok=True)
     summary = {'total': len(syms), 'success': [], 'failed': {}}
 

@@ -1,0 +1,61 @@
+services:
+  web:
+    image: new_project:latest
+    container_name: newproject_web_prod
+    expose:
+      - "8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - API_KEY=${API_KEY:-}
+      - RATE_LIMIT_PER_MIN=200
+    restart: unless-stopped
+    networks:
+      - webnet
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: newproject_caddy
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+      - ACME_EMAIL=${ACME_EMAIL:-}
+    volumes:
+      - ../caddy/conf/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../caddy/data:/data
+      - ../caddy/config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - webnet
+
+  ddns:
+    image: python:3.11-slim
+    container_name: newproject_ddns
+    restart: unless-stopped
+    profiles: ["ddns"]
+    env_file:
+      - ../../.env
+    working_dir: /app
+    volumes:
+      - ../../scripts/ddns:/app:ro
+    command:
+      - sh
+      - -c
+      - set -e; python -m pip install -q requests; python -u ddns_updater.py
+    networks:
+      - webnet
+
+networks:
+  webnet:
+    driver: bridge
+
+volumes: {}

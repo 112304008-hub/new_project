@@ -3,7 +3,7 @@ from pathlib import Path
 import main
 
 TASK_ID = '0bbe5a32-b164-4448-8f14-c923c7899dad'
-DATA_DIR = Path(__file__).parent / 'data'
+DATA_DIR = Path(__file__).resolve().parents[2] / 'data'
 
 print(f'Monitoring bulk task {TASK_ID} (polling in-process BULK_TASKS)...')
 start = time.time()

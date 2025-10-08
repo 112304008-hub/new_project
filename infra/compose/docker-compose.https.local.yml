@@ -8,9 +8,9 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./infra/caddy/conf/Caddyfile.local:/etc/caddy/Caddyfile:ro
-      - ./infra/caddy/data:/data
-      - ./infra/caddy/config:/config
+      - ../caddy/conf/Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - ../caddy/data:/data
+      - ../caddy/config:/config
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost/health"]
       interval: 30s
