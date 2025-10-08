@@ -1,16 +1,15 @@
-import urllib.request, json
-#TODO: 
-def fetch(url):
-    try:
-        with urllib.request.urlopen(url, timeout=10) as r:
-            data = r.read()
-            return json.loads(data)
-    except Exception as e:
-        return {'error': str(e)}
+"""
+Deprecated: This ad-hoc API checker has been superseded by pytest tests in the tests/ folder.
 
-if __name__ == '__main__':
-    base = 'http://127.0.0.1:8000'
-    print('Fetching /api/latest_features')
-    print(fetch(base + '/api/latest_features?max_items=200'))
-    print('\nFetching /api/lag_stats (may take a few seconds)')
-    print(fetch(base + '/api/lag_stats'))
+Use one of these instead:
+  - pytest -q tests\
+  - python -m scripts.dev.run_api_smoke
+
+This script now exits immediately to avoid confusion.
+"""
+
+import sys
+
+if __name__ == "__main__":
+    print("[deprecated] Use `pytest -q tests/` or `python -m scripts.dev.run_api_smoke` instead.")
+    sys.exit(0)

@@ -1,13 +1,14 @@
-import urllib.request
+"""
+Deprecated: Static asset smoke-check moved to tests/ and FastAPI app health checks.
 
-url = 'http://127.0.0.1:8000/static/ComfyUI_00012_.png'
-print('Requesting', url)
-try:
-    with urllib.request.urlopen(url, timeout=10) as r:
-        print('Status:', r.getcode())
-        info = r.info()
-        print('Content-Type:', info.get_content_type())
-        data = r.read()
-        print('Bytes:', len(data))
-except Exception as e:
-    print('Error:', e)
+Try:
+  - pytest -q tests\
+  - curl http://localhost:8000/health
+  - curl http://localhost:8000/static/<file>
+"""
+
+import sys
+
+if __name__ == "__main__":
+    print("[deprecated] Static checks are covered by tests and /health. See README for details.")
+    sys.exit(0)
