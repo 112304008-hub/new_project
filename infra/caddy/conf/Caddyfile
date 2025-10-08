@@ -2,3 +2,23 @@
 	encode zstd gzip
 	reverse_proxy web:8000
 }
+
+# HTTP server: allow /health without redirect so external health checks on port 80 get 200
+http://{$DOMAIN} {
+	@health path /health
+	# forward health to upstream app directly
+	handle @health {
+		reverse_proxy web:8000
+	}
+	# everything else -> HTTPS
+	redir https://{$DOMAIN}{uri}
+}
+
+# Also allow container-internal healthcheck using Host: localhost
+http://localhost {
+	@health path /health
+	handle @health {
+		reverse_proxy web:8000
+	}
+	redir https://{$DOMAIN}{uri}
+}

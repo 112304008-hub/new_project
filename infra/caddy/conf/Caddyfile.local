@@ -2,3 +2,11 @@ localhost {
     encode zstd gzip
     reverse_proxy web:8000
 }
+
+http://localhost {
+    @health path /health
+    handle @health {
+        reverse_proxy web:8000
+    }
+    redir https://localhost{uri}
+}
