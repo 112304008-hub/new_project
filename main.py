@@ -1,4 +1,57 @@
-# main.py — Main application script for the FastAPI application
+"""main.py — FastAPI 主應用程式
+
+本服務核心目標：
+1. 提供『股價籤筒 / 預測 API』：/api/draw 讀取最新特徵 CSV 與已訓練模型，回傳「明日漲跌」推論結果與籤筒格式文字。
+2. 支援動態建立/更新個股特徵資料：/api/build_symbol, /api/build_symbols 等，必要時自動用 yfinance 下載歷史價量並產生特徵 CSV。
+3. 提供批次背景建置與自動更新機制：
+     - 單一或多個 symbol 的自動輪巡 (_symbol_loop)
+     - 指數成分（sp500, nasdaq100, twse）整體迴圈 (_index_loop)
+4. 暴露統計診斷與特徵檢定：/api/diagnostics, /api/stattests, /api/lag_stats, /api/series, /api/latest_features。
+5. 提供 Prometheus 指標 (/metrics) 與健康檢查 (/health) 供部署監控；版本資訊 (/version) 供快速稽核。
+
+主要設計重點：
+- 所有模型推論僅在已存在 models/ 內的 *_pipeline.pkl + *_threshold.pkl 情況下執行；若不存在則回傳友善錯誤訊息。
+- 資料目錄分離：讀取 data/，可另設 DATA_DIR_WRITE（環境變數）指向可寫入的 data_work/ 以利唯讀環境（Docker read-only layer / Kubernetes volume）。
+- 自動更新註冊檔 (auto_registry.json / index_auto_registry.json) 儲存在可寫目錄以支援重啟後還原背景任務。
+- Rate Limit（記憶體級）簡易實作，避免濫用 API。
+- 監控指標：HTTP 請求計數/延遲、背景任務數量、模型/資料就緒狀態。
+
+常用環境變數：
+    API_KEY              （可選）— 若設置，保護 /api/* 端點需以 request header: x-api-key 傳遞。
+    RATE_LIMIT_PER_MIN   （預設 120）— 單個 IP 每分鐘允許請求數（排除 /health, /metrics 等安全端點）。
+    DATA_DIR_WRITE        指定可寫入資料夾；未設置時 fallback 到專案內 data_work/。
+    LOG_LEVEL            （INFO/DEBUG...）
+    APP_GIT_SHA / APP_BUILD_TIME — 於 CI/CD build 注入版本資訊。
+
+快速啟動 (開發)：
+    python -m uvicorn main:app --reload --port 8000
+或直接執行：
+    python main.py
+
+主要端點概覽（摘要）：
+    GET /                      — 首頁（籤筒/前端頁面 template2.html）
+    GET /api/draw              — 取得預測籤（參數：model, symbol 可選）
+    GET /api/build_symbol      — 單一 symbol 生成/刷新特徵
+    GET /api/build_symbols     — 多 symbols 生成
+    GET /api/list_symbols      — 列出現有特徵 CSV
+    批次：/api/bulk_build_start /status /stop
+    自動任務（個股）：/api/auto/start_symbol /stop_symbol /start_many /stop_many /start_existing_csvs /list_registry
+    自動任務（指數）：/api/auto/start_index /stop_index /list_index
+    診斷與統計：/api/diagnostics /api/stattests /api/lag_stats /api/series /api/latest_features
+    監控：/health /metrics /version
+
+檔案閱讀指南：
+    _symbol_* / _index_* 系列：管理個股與指數的特徵 CSV 建構邏輯與自動輪巡。
+    BULK_TASKS 結構：儲存批次工作進度 (status, total, done, errors, started_at ...)。
+    predict() 相關邏輯在 stock.py；本檔僅做輸入驗證與錯誤處理 / 回應格式化。
+
+維護建議：
+    - 新增模型時：確保 stock.py 產出的 *_pipeline.pkl 與 *_threshold.pkl 命名一致，並更新 /api/draw 的預設允許 model 名稱。
+    - 增加大型迴圈請務必觀察 Prometheus 指標與記憶體使用量。
+    - 若路徑/資料 schema 調整，記得同步更新 _update_gauges 與相關健康檢查。
+
+本模組只加入說明性文字，未改變既有行為。
+"""
 import os
 import time as _time
 import logging

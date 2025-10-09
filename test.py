@@ -1,3 +1,46 @@
+"""test.py — 特徵資料建構 / 自動更新服務 (Traditional Chinese 說明)
+
+角色定位：
+    1. 產生統一 schema 的特徵資料檔 short_term_with_lag3.csv（或其他 symbol 對應 CSV）。
+    2. 可作為獨立 FastAPI 服務 (TSMC CSV Builder) 提供 /api/quick /api/auto/* 端點。
+    3. 提供指令列批次建置多個 symbols，並將摘要輸出寫入 batch_<ts>_summary.json。
+    4. 自動在啟動事件 (startup) 背景建立最新 CSV（若成功）。
+
+與 main.py / stock.py 關係：
+    - stock.py 著重於模型訓練與推論；
+    - main.py 為預測 API 聚合層；
+    - test.py 則專注在『資料層』：抓取股價 + 外生因子 (TSM ADR, USD/TWD) + 建構技術指標 + 滯後特徵 + 統計檢定。
+
+核心流程 (perform_update):
+    - 取得 symbol（預設 2330）OHLCV（優先 TwelveData，有金鑰時；失敗則 fallback yfinance）
+    - 建構報酬、Gap、振幅、移動平均、乖離、成交量衍生 (log / rel20)、多組滯後欄位
+    - 併入外生因子：TSM ADR / USD/TWD 匯率與其回報、gap 等
+    - 進行統計檢定（Pearson, 線性迴歸, Shapiro, ADF），結果附帶 process 步驟清單
+    - 寫入 UTF-8 BOM CSV 及 last_update.txt 時戳檔
+
+自動化：
+    /api/auto/start 啟動 asyncio 週期任務；每 interval 分鐘呼叫 perform_update。
+    /api/auto/stop 終止任務。
+
+CLI 用法範例：
+    單一 symbol：
+        python test.py --symbol 2330 --key <TWELVE_API_KEY>
+    批次 symbols：
+        python test.py --symbols 2330,2317,AAPL --key <TWELVE_API_KEY>
+
+重要函式：
+    build_symbol()   — 建構單一 symbol 基本與衍生特徵
+    enrich()         — 併外生因子 (ADR, 匯率)
+    perform_update() — 串接建構 + enrich + 檢定 + 寫檔
+    _stat_tests()    — 滯後特徵統計推論
+
+注意事項：
+    - _stat_tests 可能較耗時；若部署需高頻更新可考慮以環境變數關閉或改成非同步延遲計算。
+    - TwelveData 金鑰缺失時完全依賴 yfinance；若遭封鎖或速率限制會影響資料新鮮度。
+    - vol_mode "rel" 生成成交量相對 20 日中位數欄位時，程式內部打字錯誤（"成交量(千股) " 帶空白），後續可修正避免欄位遺漏。
+
+本模組加入的是說明文件，不變更原始行為。
+"""
 # test.py — 最終版：固定檔名、UTF-8-BOM、啟動自動建檔、五分鐘自動更新、yfinance 備援
 import os, asyncio
 from pathlib import Path

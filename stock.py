@@ -1,4 +1,52 @@
-# stock.py
+"""stock.py — 模型訓練與推論核心模組 (Traditional Chinese 說明)
+
+功能總覽：
+1. 單次訓練 / 推論：提供 predict(), predict_latest(), train() 等函式。
+2. 支援兩種模型：
+     - 隨機森林 (rf)
+     - 邏輯迴歸 (lr)
+3. 動態選擇與保存最佳機率閾值 (threshold) 以提升分類 F1 (weighted) 表現。
+4. 支援符號 (symbol) 對應的獨立特徵 CSV 自動建構（若缺失則嘗試使用 yfinance 抓取歷史價量）。
+5. 以 Pipeline (scaler + model) 保存，利於後續推論不需重新擬合尺度。
+6. 預期特徵名稱會保存於 feature_names.json，推論時若缺失欄位會自動補 0.0 避免錯誤。
+
+資料來源與假設：
+    預設會讀取 data/short_term_with_lag3.csv（或 symbol 對應 <symbol>_short_term_with_lag3.csv）
+    檔案須包含欄位：『收盤價(元)』 (用來計算標的明日漲跌) 及其餘自動生成的技術與滯後特徵。
+
+主要輸出：
+    predict() 回傳 dict：
+        {"label": "漲/跌", "proba": float, "threshold": float, "model": "rf|lr", "csv": "絕對路徑", "symbol": 可選 }
+
+CLI 使用方式：
+    1) 直接預測（若已存在模型檔）：
+             python stock.py --model rf
+    2) 指定輸入 CSV：
+             python stock.py --csv path/to/file.csv --model lr
+    3) 訓練並儲存模型到 models/：
+             python stock.py --model all --train   # 會訓練 rf + lr 兩者
+
+程式內部主要流程 (predict):
+    - 讀取或建立 symbol 專屬 CSV (若缺失且給定 symbol)
+    - 構造 y: 明天收盤價相對今天的報酬 (含閾值 THRESH = ±0.01 區間標示 NaN 排除)
+    - 依時間切分 (TEST_SPLIT, VAL_SPLIT) -> 尋找最佳 threshold -> Retrain 全訓練集 -> 保存 pipeline + threshold
+    - 若已存在模型與 threshold：直接載入並根據保存特徵順序抽取最後一列預測
+
+關鍵常數：
+    THRESH = 0.01         # 報酬率正負 1% 以內視為不確定 (NaN) 不參與訓練
+    VAL_SPLIT = 0.2       # 訓練集中再切出驗證集合比例
+    TEST_SPLIT = 0.2      # 最末端 20% 做為 pseudo test（實際仍只用來分離）
+
+增修建議：
+    - 若未來新增第三種模型，可參考 train() 內部迴圈拓展並確保命名 <name>_pipeline.pkl / <name>_threshold.pkl。
+    - 可考慮將特徵工程與資料清理抽出成獨立模組以利重用（目前散佈於 test.py 與 yfinance 建構函式）。
+    - 真實生產環境建議鎖定隨機種子 / 使用交叉驗證或時間序列分割並記錄訓練指標。
+
+注意：
+    目前 predict() 若未找到已保存模型會重新訓練，這對「僅推論容器」不合適；部署時可移除訓練分支，避免意外重訓。
+
+本檔案加入的是說明註解，未調整原有行為。
+"""
 # 用法1：python stock.py --model rf         # 直接讀 .\data\short_term_with_lag3.csv
 # 用法2：python stock.py --csv 路徑 --model rf
 # 用法3：from stock import predict, predict_latest; predict_latest(model="rf")
