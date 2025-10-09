@@ -91,6 +91,9 @@ docker compose -f infra/compose/docker-compose.prod.yml up -d
 
 ## 📂 專案結構
 
+> 更完整腳本/端點與測試覆蓋摘要請見 `docs/SUMMARY.md`。
+
+### 目錄樹
 ```
 new-project/
 ├── 📄 README.md
@@ -135,6 +138,38 @@ new-project/
 ├── 🐳 docker-compose.override.yml  # 本機疊加（可選）
 └── 📦 requirements.txt       # Python 依賴
 ```
+
+### 腳本快速索引
+| 類別 | 位置 | 作用 | 典型用法 |
+|------|------|------|----------|
+| 批次成分股 | scripts/batch/fetch_sp500_github.py | 從 GitHub 抓 S&P500 並建置前 50 | `python -m scripts.batch.fetch_sp500_github` |
+| 批次分段 | scripts/batch/start_first50.py | 使用內部方法建置前 50 | `python -m scripts.batch.start_first50` |
+| 批次分段 | scripts/batch/start_next50.py | GitHub 清單第 51-100 | `python -m scripts.batch.start_next50` |
+| 批次監控 | scripts/batch/start_and_monitor_batch3.py | 101-150 建置 + 監控 | `python -m scripts.batch.start_and_monitor_batch3` |
+| 批次監控 | scripts/batch/start_and_monitor_batch4.py | 151-200 建置 + 監控 | `python -m scripts.batch.start_and_monitor_batch4` |
+| 開發冒煙 | scripts/dev/run_api_smoke.py | 呼叫函式層快速檢查 | `python -m scripts.dev.run_api_smoke` |
+| 預測測試 | scripts/dev/run_predict.py | 測試單一 symbol 推論 | `python -m scripts.dev.run_predict -s AAPL` |
+| 多檔建置 | scripts/dev/run_bulk_build.py | 建置多 symbols + 列表 | `python -m scripts.dev.run_bulk_build` |
+| Bulk 端點 | scripts/dev/run_test_bulk.py | 用 TestClient 呼叫 bulk API | `python -m scripts.dev.run_test_bulk` |
+| Bulk 輪詢 | scripts/dev/run_bulk_task_test.py | 啟動並輪詢任務 | `python -m scripts.dev.run_bulk_task_test` |
+| 任務監控 | scripts/dev/monitor_task2.py | 監視已知 task_id 進度 | 修改常數後執行 |
+| TwelveData | scripts/tools/check_twelve.py | 額度與取價測試 | 設 TWELVE_API_KEY 後執行 |
+| Docs 轉繁 | scripts/docs/convert_to_traditional.py | docs/ 轉繁體 | `python -m scripts.docs.convert_to_traditional` |
+| 動態 DNS | scripts/ddns/ddns_updater.py | DuckDNS/CF 更新 A 記錄 | docker compose ddns 服務 |
+
+### 測試覆蓋摘要
+| 測試檔 | 核心驗證 |
+|--------|----------|
+| test_api.py | 健康 / 基礎預測 / 列表 / API key & rate limit 基本 |
+| test_api_extras.py | metrics/version / series / latest_features 邊界 |
+| test_error_paths.py | 錯誤回應情境 (缺檔、損毀、批次錯誤) |
+| test_index_auto.py | 指數與 existing CSV 自動任務 |
+| test_rate_and_metrics.py | Rate limit 與背景任務指標 |
+| test_stats_endpoints.py | 統計檢定 / lag 特徵/ series |
+| test_tasks_and_safety.py | 批次任務（monkeypatch 加速） |
+| conftest.py | 臨時模型/資料 fixture 建置 |
+
+> 若新增端點或背景流程，請同步更新本表與 `docs/SUMMARY.md`。
 
 ---
 
@@ -540,6 +575,47 @@ python .\scripts\docs\convert_to_traditional.py
 ---
 
 ## 🌐 一次性更新 DDNS（固定 IP 模式）
+## 🛠️ Makefile 與 Windows 快捷腳本
+
+已新增 `Makefile` 與 `scripts/win/dev_shortcuts.ps1`：
+
+```powershell
+# Unix / WSL
+make install
+make dev
+make train-all
+
+# Windows PowerShell (dot-source 以載入函式)
+. .\scripts\win\dev_shortcuts.ps1
+Start-Dev
+Train-All
+Bulk-SP500
+```
+
+若缺少 make，可直接閱讀 Makefile 對應命令複製執行。
+
+## 🧪 DDNS 本地測試建議
+
+DuckDNS 測試（oneshot）：
+```powershell
+$env:DDNS_PROVIDER='duckdns'
+$env:DUCKDNS_DOMAIN='yourdomain'
+$env:DUCKDNS_TOKEN='token'
+$env:DDNS_ONESHOT='true'
+python -m scripts.ddns.ddns_updater
+```
+
+Cloudflare 測試：
+```powershell
+$env:DDNS_PROVIDER='cloudflare'
+$env:CLOUDFLARE_API_TOKEN='cf_api_token'
+$env:CF_ZONE_NAME='example.com'
+$env:CF_RECORD_NAME='ddns.example.com'
+$env:DDNS_ONESHOT='true'
+python -m scripts.ddns.ddns_updater
+```
+
+看到 `ddns: updated <provider> record to <IP>` 即代表成功。
 
 使用 PowerShell 腳本載入 `.env` 後執行 DDNS 更新（支援 DDNS_STATIC_IP + DDNS_ONESHOT）：
 
