@@ -1,3 +1,14 @@
+"""test_api_extras.py — 進階/附加 API 端點測試（繁體中文說明）
+
+涵蓋：
+    - /version /metrics
+    - /api/series /api/latest_features 邊界與錯誤
+    - /api/build_symbol 模擬建置
+    - /api/list_symbols 寫入目錄優先權
+    - 模型缺失 / API key 保護錯誤路徑
+
+目的：針對非最核心但常見輔助端點做回歸驗證。
+"""
 import os
 from pathlib import Path
 import time

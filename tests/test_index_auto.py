@@ -1,3 +1,11 @@
+"""test_index_auto.py — 指數自動更新迴圈相關測試（繁體中文說明）
+
+涵蓋：
+    - /api/auto/start_index 建立註冊檔與停止
+    - /api/auto/start_existing_csvs 針對現有 CSV 建立個別 symbol 迴圈
+
+目標：確保註冊檔寫入、背景 Task 建立與回應格式正確。
+"""
 import json
 import time
 

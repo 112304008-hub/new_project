@@ -1,3 +1,12 @@
+"""test_stats_endpoints.py — 統計分析相關端點測試（繁體中文說明）
+
+涵蓋：
+    - /api/stattests 正常與欄位缺失情形
+    - /api/lag_stats 自訂 CSV 情境
+    - /api/series 搭配 symbol CSV
+
+目的：確保統計檢定與時間序列特徵查詢端點在典型與邊界案例下都能回傳可解析 JSON。
+"""
 import re
 from pathlib import Path
 

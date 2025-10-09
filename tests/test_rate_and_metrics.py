@@ -1,3 +1,11 @@
+"""test_rate_and_metrics.py — Rate Limit 與 Metrics 相關測試（繁體中文說明）
+
+內容：
+    - 人為降低 RATE_LIMIT_PER_MIN 以觸發速率限制
+    - 啟動 symbol 自動任務後檢視 Prometheus 指標是否出現 app_background_tasks
+
+目的：驗證服務端監控與保護機制可被觀測。
+"""
 import re
 import time
 

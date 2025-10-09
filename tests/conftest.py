@@ -4,6 +4,16 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+"""conftest.py — pytest 共用設定與治具（fixtures）說明（繁體中文）
+
+提供內容：
+    tmp_workspace    建立隔離的臨時工作目錄 (含 data/ models/)
+    tmp_csv          建立最小可用特徵 CSV（含收盤價欄位）
+    prepared_models  在臨時資料集上訓練一個輕量模型 (lr) 供推論端點使用
+    client           綁定上述資源並回傳 TestClient (FastAPI)
+
+目的：確保測試間不互相汙染，並且能在無網路或無外部依賴的環境下進行。
+"""
 # Ensure project root is importable (so `import main` works when running pytest from repo root)
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:

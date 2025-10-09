@@ -1,6 +1,13 @@
-"""
-Start and monitor S&P500 batch 101-150 in-process.
-Writes summary to data/bulk_task_<task_id>_summary.json
+"""start_and_monitor_batch3.py — 啟動並監控 S&P500 第 101~150 檔批次（繁體中文說明）
+
+功能：
+    1. 擷取清單 → 取 100:150 區間（實際顯示為 101~150）。
+    2. 呼叫 bulk_build_start 啟動背景任務。
+    3. 輪詢 BULK_TASKS 直到完成或逾時（10 分鐘）。
+    4. 蒐集成功建立的 CSV 路徑並寫入 data/bulk_task_<task_id>_summary.json。
+
+使用：
+    python -m scripts.batch.start_and_monitor_batch3
 """
 import time
 import requests

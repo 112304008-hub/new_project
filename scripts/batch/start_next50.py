@@ -1,3 +1,16 @@
+"""start_next50.py — 從 GitHub Raw 取 S&P500 清單並建置第 51~100 檔（繁體中文說明）
+
+邏輯：
+    - 下載 constituents.csv
+    - 取索引 50:100 (即第 51~100) 的 ticker
+    - 呼叫 bulk_build_start(concurrency=4)
+
+使用：
+    python -m scripts.batch.start_next50
+
+調整：
+    - 想改範圍可調整 next50 = tickers[50:100]
+"""
 import requests
 from main import bulk_build_start
 

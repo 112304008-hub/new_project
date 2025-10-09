@@ -1,22 +1,19 @@
-"""
-批次工具：從 GitHub raw 抓取 S&P 500 成分股清單，並啟動第一批（前 50 檔）資料建置。
+"""fetch_sp500_github.py — 從 GitHub 擷取 S&P500 清單並啟動前 50 檔批次建置（繁體中文說明）
 
-用途
-- 下載 `constituents.csv` 並解析 Symbol 欄位
-- 為避免一次觸發過多任務，僅取前 50 檔交由 `main.bulk_build_start(concurrency=4)` 背景建置
+功能：
+    - 下載 `constituents.csv` → 解析 Symbol 欄位 → 正規化（將 '.' 換成 '-'）
+    - 取前 50 檔以避免同時過度壓力，再呼叫 bulk_build_start(concurrency=4) 背景建置
 
-執行方式（請在專案根目錄執行）
-- `python -m scripts.batch.fetch_sp500_github`
-- 或 `python .\scripts\batch\fetch_sp500_github.py`
+執行（於專案根目錄）：
+    python -m scripts.batch.fetch_sp500_github
+    或 python scripts/batch/fetch_sp500_github.py
 
-前置條件
-- 需要可連外的網路環境
-- 本腳本直接呼叫 `main.py` 的函式，不需先啟動 Web 服務
-- `bulk_build_start` 為 async 函式，腳本內會使用 `asyncio.run(...)` 啟動事件迴圈
+重要：
+    - bulk_build_start 為 async；此腳本用 asyncio.run() 以取得回傳值
+    - 調整批次大小：修改 first50 切片範圍
 
-注意
-- Ticker 中的「.」會轉為「-」（較符合 Yahoo Finance 符號）
-- 若要調整數量，可修改 `tickers[:50]` 的切片
+適合於：
+    - 初次啟動環境快速生成部分基礎特徵檔
 """
 
 import asyncio

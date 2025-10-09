@@ -1,3 +1,15 @@
+"""test_error_paths.py — 錯誤處理與異常路徑測試（繁體中文說明）
+
+測試焦點：
+    - 模板缺失時首頁 404
+    - diagnostics：檔案缺失 / 損毀 (非 CSV) 回應碼
+    - build_symbols 混合成功與失敗情境
+    - bulk_build_status 不存在 task
+    - latest_features 指定 symbol CSV
+    - /metrics 是否包含自訂計數器
+
+確保例外情況回傳合理 HTTP 狀態與訊息。
+"""
 import uuid
 from pathlib import Path
 

@@ -1,3 +1,11 @@
+"""test_tasks_and_safety.py — 批次任務與猴補 (monkeypatch) 安全測試（繁體中文說明）
+
+焦點：
+    - 以 fake builder / fake worker 模擬快速完成 bulk_build_start 工作
+    - 驗證狀態轉換、完成統計與檔案輸出
+
+目的：避免真正網路 I/O，快速確認背景任務資料結構 (BULK_TASKS) 邏輯。
+"""
 import time
 from pathlib import Path
 import pandas as pd

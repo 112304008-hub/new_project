@@ -1,6 +1,9 @@
-"""
-Start and monitor S&P500 batch 151-200 in-process.
-Writes summary to data/bulk_task_<task_id>_summary.json
+"""start_and_monitor_batch4.py — 啟動並監控 S&P500 第 151~200 檔批次（繁體中文說明）
+
+功能與流程：同 batch3 版本，但切片為 150:200（顯示 151~200）。
+
+輸出：
+    data/bulk_task_<task_id>_summary.json 內含 task_id / 進度 / 錯誤 / 產生的 CSV 清單。
 """
 import time
 import requests

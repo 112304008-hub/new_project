@@ -1,3 +1,15 @@
+"""test_api.py — 基礎 API 功能測試（繁體中文說明）
+
+涵蓋：
+    - /health 基本健康檢查
+    - /api/list_symbols 回傳結構與基本符號存在
+    - /api/draw (含帶/不帶 symbol)
+    - /api/diagnostics 基本欄位
+    - API Key 保護與簡單 Rate Limit 行為
+    - 簡化 symbol 自動 CSV 建構流程
+
+目的：確保最核心端點在測試環境下可正常互動。
+"""
 def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200

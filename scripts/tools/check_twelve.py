@@ -1,6 +1,26 @@
-# check_twelve.py
-import requests
+"""check_twelve.py — Twelve Data API 使用額度 / 基本連線測試工具（繁體中文說明）
 
+用途：
+    1. 檢查目前 TWELVE_API_KEY（環境變數）對應的方案與剩餘 Request 額度。
+    2. 送出一個最簡單的 TSM (ADR) 日線請求驗證 API 是否可用。
+
+使用方式：
+    PowerShell:
+        $env:TWELVE_API_KEY = '你的KEY'
+        python -m scripts.tools.check_twelve
+
+    或直接：
+        python scripts/tools/check_twelve.py
+
+輸出說明：
+    - 若 API 金鑰缺失，會顯示設定提示。
+    - 成功會列出方案(plan)、每分鐘/每日限制與已使用次數。
+    - 測試請求 (test_sample_call) 會顯示最新一筆價格 values[0]。
+
+維護建議：
+    - 若需擴充其它測試（例如多 Symbol、延遲測量），可在底部新增函式並於 __main__ 呼叫。
+"""
+import requests
 import os
 
 API_KEY = os.environ.get("TWELVE_API_KEY")  # set this in your environment
@@ -47,5 +67,6 @@ def test_sample_call():
         print("❌ 無法取得股價資料：", e)
 
 if __name__ == "__main__":
+    # 主程式流程：先檢查額度再做取價測試
     check_usage()
     test_sample_call()

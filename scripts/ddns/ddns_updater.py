@@ -1,3 +1,31 @@
+"""ddns_updater.py — 動態 DNS 更新工具（DuckDNS / Cloudflare 支援，繁體中文說明）
+
+目的：
+    於容器或家用網路環境定期偵測外網 IPv4，並透過 DuckDNS 或 Cloudflare API 更新 A Record。
+
+環境變數：
+    通用：
+        DDNS_PROVIDER=duckdns|cloudflare  指定提供者（必填）
+        DDNS_INTERVAL_SECONDS=300         更新間隔（秒），預設 300
+        DDNS_STATIC_IP=1.2.3.4            指定固定 IP（跳過偵測）
+        DDNS_ONESHOT=true|1               僅執行一次後離開
+    DuckDNS 專用：
+        DUCKDNS_DOMAIN, DUCKDNS_TOKEN
+    Cloudflare 專用：
+        CLOUDFLARE_API_TOKEN, CF_ZONE_NAME, CF_RECORD_NAME
+
+運作：
+    - 若 STATIC_IP 未提供，使用 https://api.ipify.org 取得公網 IP
+    - IP 無變更則略過；變更則呼叫對應更新 API
+    - oneshot 模式下完成一次更新即結束
+
+錯誤處理：
+    - 任何網路錯誤印出訊息後等待下一輪（非 oneshot）
+
+擴充建議：
+    - 加入 IPv6 支援
+    - 增加其他服務商（Route53, Gandi, Cloudflare proxied=True 模式）
+"""
 import os
 import time
 import json
