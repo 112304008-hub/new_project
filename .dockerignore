@@ -1,3 +1,9 @@
+# Added by automation: 保持映像精簡，忽略本地模型/資料暫存（仍保留 models/ 若需 baked 模型可移除註解）。
+# 若希望將 data/ 與 models/ 烤入映像，可移除下列註解並在 Dockerfile 中調整 COPY。
+data_work/
+htmlcov/
+.pytest_cache/
+scripts/win/
 __pycache__/
 .venv/
 venv/
