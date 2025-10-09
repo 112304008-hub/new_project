@@ -105,6 +105,6 @@ logs/
 docker-compose.override.local.generated.yml
 
 # Runtime outputs (do not version control)
-data_work/
+data_work/*
 !data_work/.gitkeep
 

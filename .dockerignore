@@ -3,13 +3,21 @@
 data_work/
 htmlcov/
 .pytest_cache/
-scripts/win/
 __pycache__/
 .venv/
 venv/
-*.pyc
-.git
-.gitignore
-*.log
 env/
+*.pyc
+*.pyo
+*.pyd
+*.so
+.git/
+.gitignore
+.gitattributes
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
 node_modules/
+# Keep scripts/ included because Dockerfile COPY scripts/ is used.
