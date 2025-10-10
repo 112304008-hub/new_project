@@ -108,6 +108,12 @@ app = FastAPI(title="股價之神", version="1.0")
 
 
 def _update_gauges():
+    """更新 Prometheus 指標狀態。
+
+    - models_ready: 是否存在任一已訓練模型檔 (*_pipeline.pkl)
+    - data_ready: 主要資料檔是否存在且非空 (data/short_term_with_lag3.csv)
+    - app_background_tasks: 目前執行中的背景任務數（批次 + 自動任務）
+    """
     try:
         models_ready = MODELS_DIR.exists() and any(MODELS_DIR.glob('*_pipeline.pkl'))
         MODELS_READY_GAUGE.set(1 if models_ready else 0)
@@ -123,6 +129,11 @@ def _update_gauges():
 
 @app.middleware("http")
 async def metrics_and_logging_middleware(request: Request, call_next):
+    """全域中間件：記錄請求、收集延遲指標、簡易速率限制與 API Key 驗證。
+
+    注意：/health, /metrics, /version, /static 與首頁不適用速率限制。
+    若設定 API_KEY，僅保護 /api/* 端點。
+    """
     start = _time.perf_counter()
     req_id = request.headers.get("x-request-id") or str(uuid.uuid4())
     # simple rate limit (memory) excluding safe paths
@@ -176,6 +187,10 @@ DATA = ROOT / "data" / "short_term_with_lag3.csv"
 
 # Writable data directory (separate from read-only data/ when desired).
 def _get_write_dir() -> Path:
+    """取得可寫入的資料目錄。
+
+    優先使用環境變數 DATA_DIR_WRITE；未設置時回退至專案內的 data_work/。
+    """
     env = os.getenv("DATA_DIR_WRITE")
     if env:
         try:
@@ -193,7 +208,7 @@ except Exception:
     # It's okay if we cannot create it now (e.g., read-only FS); writers will attempt later.
     pass
 
-# serve any static assets placed in the project static/ directory (e.g. static/temple.jpg)
+# 服務專案 static/ 目錄下的靜態資源（例如 static/temple.jpg）
 STATIC_DIR = ROOT / "static"
 if not STATIC_DIR.exists():
     try:
@@ -205,12 +220,18 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # === 首頁：籤筒網頁 ===
 @app.get("/")
 def home():
+    """首頁：若存在 `template2.html`，回傳檔案；否則回應 404 JSON。"""
     return FileResponse(HTML) if HTML.exists() else JSONResponse({"error": "template2.html 不存在"}, status_code=404)
 
 # === API: 抽籤（預測）=== 
 @app.get("/api/draw")
 def draw(model: str = "rf", symbol: str | None = None):
-    # If no symbol specified, require the default CSV to exist
+    """執行單次預測。
+
+    - 若未提供 symbol，使用主要資料檔 DATA；須先存在訓練好的模型檔。
+    - 回傳包含 label/proba/threshold 與可讀的 fortune 文案。
+    """
+    # 若未指定 symbol，需確保預設 CSV 存在
     if not symbol:
         if not DATA.exists() or DATA.stat().st_size == 0:
             return JSONResponse({
@@ -222,7 +243,7 @@ def draw(model: str = "rf", symbol: str | None = None):
                 }
             }, status_code=404)
 
-    # Only allow inference: require pre-trained pipeline and threshold to exist
+    # 僅允許推論：需要已訓練的 pipeline 與 threshold 檔案存在
     model_file = MODELS_DIR / f"{model}_pipeline.pkl"
     thr_file = MODELS_DIR / f"{model}_threshold.pkl"
     if not model_file.exists() or not thr_file.exists():
@@ -239,9 +260,9 @@ def draw(model: str = "rf", symbol: str | None = None):
         }, status_code=404)
 
     try:
-        # artifacts exist -> safe to call predict (it will only load & infer)
+    # 既有模型檔存在 -> 呼叫 predict 進行推論
         if symbol:
-            # Resolve or build symbol CSV deterministically, then pass explicit path
+            # 解析或建立 symbol 對應 CSV，並傳入明確路徑
             csvp = _ensure_symbol_csv(symbol)
             out = predict(str(csvp), model=model, symbol=symbol)
         else:
@@ -267,14 +288,14 @@ def draw(model: str = "rf", symbol: str | None = None):
             "label": out["label"],
             "fortune": fortune
         }
-        # include symbol/csv info if predict provided it
+    # 若 predict 回傳包含 symbol/csv，則一併回傳
         if isinstance(out, dict) and out.get('symbol'):
             resp['symbol'] = out.get('symbol')
         if isinstance(out, dict) and out.get('csv'):
             resp['csv'] = out.get('csv')
         return resp
     except Exception as e:
-        # Fallback: if symbol provided, attempt direct pipeline inference to avoid fragile paths
+    # 退而求其次：若有提供 symbol，改走直接載入 pipeline 推論以避免路徑問題
         if symbol:
             try:
                 csvp = _symbol_csv_path(symbol)
@@ -293,7 +314,7 @@ def draw(model: str = "rf", symbol: str | None = None):
                 thr_file = MODELS_DIR / f"{model}_threshold.pkl"
                 pipeline: _Pipeline = _joblib.load(model_file)
                 thr = _joblib.load(thr_file)
-                # infer expected features
+                # 推斷模型所需特徵欄位
                 expected = None
                 for step_name in ("scaler", "rf", "lr", "mdl"):
                     if step_name in getattr(pipeline, 'named_steps', {}):
@@ -307,7 +328,7 @@ def draw(model: str = "rf", symbol: str | None = None):
                     n = int(pipeline.n_features_in_)
                     numeric_cols = X_all.select_dtypes(include=[np.number]).columns.tolist()
                     expected = numeric_cols[-n:] if n and len(numeric_cols) >= n else numeric_cols
-                # ensure expected columns exist
+                # 確保必要欄位存在
                 if expected:
                     missing = [c for c in expected if c not in X_all.columns]
                     for c in missing:
@@ -342,7 +363,7 @@ def draw(model: str = "rf", symbol: str | None = None):
                         "advice": "請重新整理或查看 log"
                     }
                 }, status_code=500)
-        # no symbol or fallback failed
+    # 未提供 symbol 或退路亦失敗
         import traceback
         err_msg = traceback.format_exc()
         return JSONResponse({
@@ -355,21 +376,21 @@ def draw(model: str = "rf", symbol: str | None = None):
         }, status_code=500)
 
 
-# === symbol helpers & per-symbol auto-update ===
+# === Symbol 輔助與個股自動更新 ===
 
 def _symbol_csv_path(symbol: str) -> Path:
-    """Preferred read path for a symbol CSV: prefer write dir copy, else read-only data dir."""
+    """取得 Symbol CSV 的優先讀取路徑：先找可寫目錄中的副本，否則回退到唯讀 data 目錄。"""
     p_w = DATA_WRITE_DIR / f"{symbol}_short_term_with_lag3.csv"
     if p_w.exists():
         return p_w
     return DATA_DIR / f"{symbol}_short_term_with_lag3.csv"
 
 def _symbol_csv_write_path(symbol: str) -> Path:
-    """Where we write/refresh a symbol CSV."""
+    """Symbol 對應 CSV 的寫入（或刷新）路徑。"""
     return DATA_WRITE_DIR / f"{symbol}_short_term_with_lag3.csv"
 
 def _ensure_symbol_csv(symbol: str) -> Path:
-    """Return Path to symbol CSV; try to build it via yfinance if missing."""
+    """確保取得 Symbol 的 CSV 路徑；若不存在則嘗試透過 yfinance 建構。"""
     # Prefer existing in write dir; else in data dir; else build into write dir
     p_read = _symbol_csv_path(symbol)
     if p_read.exists() and p_read.stat().st_size > 0:
@@ -395,12 +416,12 @@ def _ensure_symbol_csv(symbol: str) -> Path:
     # Fallback message if file still missing
     raise FileNotFoundError(f"Symbol CSV 仍然不存在：{_symbol_csv_write_path(symbol)}")
 
-# manage per-symbol auto tasks
+# 管理個股自動任務
 SYMBOL_TASKS: Dict[str, asyncio.Task] = {}
-# Index-wide auto update tasks (e.g. sp500, nasdaq100) so we don't spawn hundreds of per-symbol coroutines.
+# 管理指數級自動任務（例如 sp500、nasdaq100），避免一次產生過多協程
 INDEX_TASKS: Dict[str, asyncio.Task] = {}
 
-# persistent registry file for auto symbol loops (symbol -> interval_min)
+# 自動任務的持久化註冊檔（symbol -> interval_min 等設定）
 _REG_FALLBACK_DIR = DATA.parent
 _REG_DIR = DATA_WRITE_DIR if DATA_WRITE_DIR else DATA.parent
 AUTO_REG_FILE = _REG_DIR / "auto_registry.json"
@@ -483,12 +504,12 @@ async def _symbol_loop(symbol: str, interval_min: int, backoff_factor: float = 2
         await asyncio.sleep(sleep_for * 60)
 
 async def _index_loop(index: str, interval_min: int, concurrency: int = 4, backoff_factor: float = 2.0, max_backoff_min: int = 30):
-    """Loop that (re)builds all symbols of an index every interval minutes.
+    """指數級自動更新迴圈：每隔 interval 分鐘（重新）建置該指數所有成分的特徵 CSV。
 
-    Strategy: fetch full list once at start (retry inside loop if empty), then each cycle:
-      - iterate symbols in chunks with limited concurrency
-      - build CSV if missing or stale (we rebuild unconditionally to keep recent data)
-    This avoids spawning one persistent task per symbol and centralizes scheduling.
+    策略：啟動時取得成分列表（若失敗則在迴圈內重試），每一輪：
+      - 以限制並發數的方式分批處理 symbols
+      - 若 CSV 缺失或過舊即重建（目前採無條件重建以保持最新）
+    這種作法避免每個 symbol 都常駐一個協程，將排程集中管理。
     """
     print(f"[index auto] 啟動指數自動更新：{index} every {interval_min} min (concurrency={concurrency}, backoff_factor={backoff_factor}, max_backoff={max_backoff_min}m)")
     syms: list[str] = []  # cached index symbols
@@ -565,7 +586,7 @@ async def _index_loop(index: str, interval_min: int, concurrency: int = 4, backo
 
 @app.get('/api/build_symbol')
 def build_symbol(symbol: str):
-    """Build a single symbol CSV on demand and return path or error."""
+    """按需建置單一 symbol 的 CSV，成功則回傳路徑，否則回傳錯誤。"""
     if not symbol:
         return JSONResponse({"ok": False, "error": "請提供 symbol 參數"}, status_code=400)
     try:
@@ -577,7 +598,7 @@ def build_symbol(symbol: str):
 
 @app.get('/api/build_symbols')
 def build_symbols(symbols: str):
-    """Build multiple symbol CSVs. `symbols` is a comma-separated list like '2330,2317,AAPL'."""
+    """一次建置多個 symbol 的 CSV。參數 `symbols` 以逗號分隔，例如 '2330,2317,AAPL'。"""
     if not symbols:
         return JSONResponse({"ok": False, "error": "請提供 symbols 參數"}, status_code=400)
     syms = [s.strip() for s in symbols.split(',') if s.strip()]
@@ -593,7 +614,7 @@ def build_symbols(symbols: str):
 
 @app.get('/api/list_symbols')
 def list_symbols():
-    """List symbol CSVs present in data/ (pattern: <symbol>_short_term_with_lag3.csv)."""
+    """列出存在於 data/（或可寫目錄）中的 symbol CSV（樣式：<symbol>_short_term_with_lag3.csv）。"""
     out = []
     seen = set()
     try:
@@ -612,7 +633,7 @@ def list_symbols():
     return {"ok": True, "count": len(out), "symbols": out}
 
 
-# === bulk fetch helpers & background tasks ===
+# === 批次抓取輔助與背景任務 ===
 BULK_TASKS: Dict[str, Dict] = {}
 
 def _fetch_index_tickers(index: str) -> list:
@@ -651,6 +672,11 @@ def _fetch_index_tickers(index: str) -> list:
 
 
 async def _bulk_build_worker(symbols, concurrency, task_id):
+    """批次建置工作器（背景任務）。
+
+    依序以限制並發數的方式為每個 symbol 產生/更新特徵 CSV，並更新 BULK_TASKS 進度。
+    此函式僅由 /api/bulk_build_start 觸發，不直接對外暴露。
+    """
     sem = asyncio.Semaphore(concurrency)
     total = len(symbols)
     BULK_TASKS[task_id]['total'] = total
@@ -700,6 +726,10 @@ async def bulk_build_start(index: str | None = None, symbols: str | None = None,
 
 @app.get('/api/bulk_build_status')
 def bulk_build_status(task_id: str):
+    """查詢批次建置任務狀態。
+
+    回傳進度（0~1）與錯誤摘要，不包含實際 asyncio.Task 物件。
+    """
     info = BULK_TASKS.get(task_id)
     if not info:
         return JSONResponse({"ok": False, "error": "找不到 task_id"}, status_code=404)
@@ -713,6 +743,7 @@ def bulk_build_status(task_id: str):
 
 @app.get('/api/bulk_build_stop')
 def bulk_build_stop(task_id: str):
+    """嘗試中止指定的批次建置任務。"""
     info = BULK_TASKS.get(task_id)
     if not info:
         return JSONResponse({"ok": False, "error": "找不到 task_id"}, status_code=404)
@@ -726,7 +757,7 @@ def bulk_build_stop(task_id: str):
 
 @app.get('/api/auto/start_symbol')
 async def auto_start_symbol(symbol: str, interval: int = 5, backoff_factor: float = 2.0, max_backoff: int = 30):
-    """Start auto-update loop for a symbol (every `interval` minutes)."""
+    """啟動單一 symbol 的自動更新迴圈（每隔 `interval` 分鐘執行）。"""
     if not symbol:
         return JSONResponse({"ok": False, "error": "請提供 symbol 參數"}, status_code=400)
     if symbol in SYMBOL_TASKS and not SYMBOL_TASKS[symbol].done():
@@ -743,6 +774,7 @@ async def auto_start_symbol(symbol: str, interval: int = 5, backoff_factor: floa
 
 @app.get('/api/auto/stop_symbol')
 async def auto_stop_symbol(symbol: str):
+    """停止單一 symbol 的自動更新 loop，並自 registry 移除。"""
     if not symbol:
         return JSONResponse({"ok": False, "error": "請提供 symbol 參數"}, status_code=400)
     t = SYMBOL_TASKS.get(symbol)
@@ -760,14 +792,15 @@ async def auto_stop_symbol(symbol: str):
 
 @app.get('/api/auto/list_registry')
 def auto_list_registry():
+    """列出目前持久化的自動任務設定（symbol -> interval/backoff 等）。"""
     reg = _load_auto_registry()
     return {"ok": True, "registry": reg}
 
 @app.get('/api/auto/start_index')
 async def auto_start_index(index: str, interval: int = 5, concurrency: int = 4, backoff_factor: float = 2.0, max_backoff: int = 30):
-    """Start an auto-update loop for an entire index (sp500 / nasdaq100 / twse).
-    This runs a single loop instead of hundreds of symbol loops.
-    NOTE: Running both per-symbol loops and index loop for overlapping symbols may cause extra load.
+    """啟動整個指數（sp500 / nasdaq100 / twse）的自動更新迴圈。
+    以單一迴圈管理全部成分，避免啟動數百個個股協程。
+    注意：若同時對重疊的 symbols 啟動個股與指數迴圈，可能造成額外負載。
     """
     if not index:
         return JSONResponse({"ok": False, "error": "請提供 index 參數"}, status_code=400)
@@ -784,6 +817,7 @@ async def auto_start_index(index: str, interval: int = 5, concurrency: int = 4, 
 
 @app.get('/api/auto/stop_index')
 def auto_stop_index(index: str):
+    """停止指數級別自動更新 loop，並自 index registry 移除。"""
     if not index:
         return JSONResponse({"ok": False, "error": "請提供 index 參數"}, status_code=400)
     ix = index.lower()
@@ -800,17 +834,17 @@ def auto_stop_index(index: str):
 
 @app.get('/api/auto/list_index')
 def auto_list_index():
-    """List active index auto loops (in-memory + registry)."""
+    """列出記憶體中正在運行的指數迴圈與持久化設定（registry）。"""
     reg = _load_index_auto_registry()
     running = [k for k, v in INDEX_TASKS.items() if not v.done()]
     return {"ok": True, "registry": reg, "running": running}
 
 @app.get('/api/auto/start_existing_csvs')
 async def auto_start_existing_csvs(interval: int = 5, backoff_factor: float = 2.0, max_backoff: int = 30):
-    """(Feature A) Start individual symbol auto-loops for every existing *_short_term_with_lag3.csv in data/.
+    """（Feature A）對 data/ 目錄下所有已存在的 *_short_term_with_lag3.csv 啟動個股自動迴圈。
 
-    This will enumerate current CSV files and create per-symbol loops (similar to calling start_many).
-    WARNING: If there are hundreds of symbols this can create many concurrent tasks; prefer index loop for large sets.
+    會枚舉現有 CSV 檔並為每個 symbol 建立迴圈（類似批次呼叫 start_many）。
+    警告：若 symbols 過多，將產生大量併發協程；對大型集合建議使用指數迴圈。
     """
     syms = []
     for p in DATA_DIR.glob('*_short_term_with_lag3.csv'):
@@ -840,10 +874,9 @@ async def auto_start_existing_csvs(interval: int = 5, backoff_factor: float = 2.
 
 @app.get('/api/auto/start_many')
 async def auto_start_many(symbols: str, interval: int = 5):
-    """Start auto-loops for a comma-separated list of symbols and persist them.
+    """為以逗號分隔的 symbols 啟動個股迴圈並持久化設定。
 
-    This endpoint is async so it can schedule tasks on the running event loop even
-    when called from the HTTP server worker thread.
+    本端點為 async，可在 HTTP worker 執行緒觸發時將任務排入事件迴圈。
     """
     syms = [s.strip() for s in symbols.split(',') if s.strip()]
     out = {}
@@ -873,6 +906,7 @@ async def auto_start_many(symbols: str, interval: int = 5):
 
 @app.get('/api/auto/stop_many')
 def auto_stop_many(symbols: str):
+    """一次停止多個 symbol 的自動 loop，並從 registry 中移除相應項目。"""
     syms = [s.strip() for s in symbols.split(',') if s.strip()]
     out = {}
     reg = _load_auto_registry()
@@ -895,12 +929,12 @@ def auto_stop_many(symbols: str):
 
 @app.get("/api/diagnostics")
 def diagnostics(n_bins: int = 20):
-    """Return diagnostic information for frontend visualization:
-    - latest_row: latest CSV row as dict
-    - feature_stats: mean/std/min/max for numeric columns
-    - histograms: simple histogram bins/counts for first few numeric features
-    - models: list of persisted model pipeline files
-    - thresholds: loaded thresholds if present
+    """回傳前端可視化所需的診斷資訊：
+    - latest_row：CSV 最新一列（dict）
+    - feature_stats：數值欄位的 mean/std/min/max
+    - histograms：前幾個數值欄位的直方圖 bins/counts
+    - models：已持久化的模型管線檔
+    - thresholds：若存在則回傳已載入的閾值
     """
     if not DATA.exists() or DATA.stat().st_size == 0:
         return JSONResponse({"error": "找不到資料 short_term_with_lag3.csv"}, status_code=404)
@@ -950,7 +984,7 @@ def diagnostics(n_bins: int = 20):
 
 @app.get('/api/stattests')
 def stat_tests(feature: str, symbol: str | None = None):
-    """Run Shapiro normality, one-sample t-test (H0: mean=0), and ADF for the given numeric feature."""
+    """針對指定數值特徵執行 Shapiro 常態性檢定、單樣本 t 檢定（H0: mean=0）、以及 ADF 單位根檢定。"""
     try:
         if symbol:
             csvp = _ensure_symbol_csv(symbol)
@@ -991,9 +1025,9 @@ def stat_tests(feature: str, symbol: str | None = None):
 
 @app.get('/api/lag_stats')
 def lag_stats(symbol: str | None = None):
-    """Compute detailed statistical inference for all lag features in the CSV.
+    """對 CSV 中所有滯後（lag）特徵進行詳細統計推論。
 
-    Returns a list of results for each lag feature (pearson r/p, linregress, shapiro, t-test, ADF).
+    回傳每個 lag 特徵的結果（皮爾森相關 r/p、線性回歸、Shapiro、t-test、ADF）。
     """
     try:
         if symbol:
@@ -1141,7 +1175,7 @@ def lag_stats(symbol: str | None = None):
 
 @app.get('/api/series')
 def series(feature: str, n: int = 500, symbol: str | None = None):
-    """Return last n values of a numeric feature for plotting."""
+    """回傳數值特徵最近 n 筆的數值，供前端繪圖使用。"""
     try:
         if symbol:
             csvp = _ensure_symbol_csv(symbol)
@@ -1161,12 +1195,12 @@ def series(feature: str, n: int = 500, symbol: str | None = None):
 
 @app.get('/api/latest_features')
 def latest_features(features: str | None = None, pattern: str | None = None, file: str | None = None, max_items: int = 100, symbol: str | None = None):
-    """Return the latest row (or a selection of columns) from the CSV as JSON.
+    """以 JSON 形式回傳 CSV 的最新一列（或指定欄位）。
 
-    - features: comma-separated column names to include (order preserved)
-    - pattern: a regex to select column names (case-insensitive)
-    - file: optional path (relative to project root) but must live under the data/ folder
-    - max_items: maximum number of columns to return (safety)
+    - features：以逗號分隔的欄位名稱（保留順序）
+    - pattern：以正則式選取欄位（不分大小寫）
+    - file：可選擇相對專案根目錄的路徑，但必須位於 data/ 之下
+    - max_items：回傳欄位的最大數量（安全限制）
     """
     # decide which CSV to read (restrict file to data/ folder) or use symbol
     csv_path = DATA
@@ -1244,14 +1278,14 @@ def latest_features(features: str | None = None, pattern: str | None = None, fil
 # === 健康檢查 endpoint ===
 @app.get('/health')
 def health():
-    """Lightweight health check used by container HEALTHCHECK.
+    """輕量健康檢查（供容器 HEALTHCHECK 使用）。
 
-    Returns JSON with:
-      - status: always "ok" if reachable
-      - versions: selected library versions
-      - models_ready: whether any model pipeline files exist
-      - data_ready: whether main DATA CSV exists and is non-empty
-    Avoids heavy operations for quick liveness/probing.
+    回傳內容：
+      - status：可達則為 "ok"
+      - versions：主要函式庫版本
+      - models_ready：是否存在任一模型管線檔
+      - data_ready：主要資料 CSV 是否存在且非空
+    避免重型操作，以利快速探測。
     """
     try:
         models_ready = False
@@ -1280,7 +1314,7 @@ def health():
 
 @app.get('/version')
 def version():
-    """Return build / version metadata (safe for public)."""
+    """回傳建置／版本資訊（可公開）。"""
     return {
         "git_sha": APP_GIT_SHA,
         "build_time": APP_BUILD_TIME,
@@ -1293,14 +1327,52 @@ def version():
 
 @app.get('/metrics')
 def metrics():
-    """Prometheus metrics endpoint."""
+    """Prometheus 指標端點。"""
     _update_gauges()
     data = generate_latest()  # bytes
     return Response(content=data, media_type=CONTENT_TYPE_LATEST)
 
+# === 快速導覽（路由與背景任務） ===
+@app.get('/api/overview')
+def api_overview(only_api: bool = True):
+    """快速導覽：列出所有路由摘要與背景任務狀態。
+
+    - only_api：僅顯示 /api/*（以及 /health、/metrics、/version、/），預設 True。
+    """
+    routes = []
+    allow_prefixes = ['/', '/health', '/metrics', '/version', '/static', '/api/']
+    for r in app.routes:
+        try:
+            methods = sorted(list(getattr(r, 'methods', []) or []))
+            path = getattr(r, 'path', '')
+            if not methods or not path:
+                continue
+            if only_api:
+                if not any(path == p or path.startswith(p) for p in allow_prefixes):
+                    continue
+            endpoint = getattr(r, 'endpoint', None)
+            summary = ""
+            if endpoint and getattr(endpoint, '__doc__', None):
+                summary = (endpoint.__doc__ or '').strip().splitlines()[0]
+            routes.append({"methods": methods, "path": path, "summary": summary})
+        except Exception:
+            continue
+    background = {
+        "symbol_loops": len([t for t in SYMBOL_TASKS.values() if not t.done()]),
+        "index_loops": len([t for t in INDEX_TASKS.values() if not t.done()]),
+        "bulk_tasks_running": sum(1 for t in BULK_TASKS.values() if isinstance(t, dict) and t.get('status') == 'running'),
+        "bulk_tasks_total": len(BULK_TASKS),
+    }
+    return {"ok": True, "routes": routes, "background": background}
+
 # === 執行啟動 ===
 @app.on_event('startup')
 async def _rehydrate_auto_registry():
+    """應用啟動時自動恢復（rehydrate）自動任務。
+
+    - 從 auto_registry.json 重啟單股 loop
+    - 從 index_auto_registry.json 重啟指數 loop
+    """
     # on server startup, read auto_registry.json and start symbol loops
     try:
         reg = _load_auto_registry()
