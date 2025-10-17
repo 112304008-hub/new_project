@@ -108,3 +108,7 @@ docker-compose.override.local.generated.yml
 data_work/*
 !data_work/.gitkeep
 
+# Large aggregated files should not be versioned; keep per-symbol CSVs only
+data/all_short_term_with_lag3.csv
+data/all_short_term_with_lag3.parquet
+
