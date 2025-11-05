@@ -8,6 +8,9 @@ services:
       - PYTHONUNBUFFERED=1
       - API_KEY=${API_KEY:-}
       - RATE_LIMIT_PER_MIN=200
+    volumes:
+      - data:/app/data
+      - models:/app/models
     restart: unless-stopped
     networks:
       - webnet
@@ -58,4 +61,6 @@ networks:
   webnet:
     driver: bridge
 
-volumes: {}
+volumes:
+  data:
+  models:

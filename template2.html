@@ -295,7 +295,7 @@
       .stage #test{ font-size:14px; }
       /* background toggles: keep in view and not overlap */
       #bgToggle{ right:8px; top:8px; padding:6px 8px; font-size:12px; }
-      #bgStatus{ right:8px; top:44px; padding:4px 6px; font-size:11px; }
+      
       /* stack side scrolls under stage, full-width, simpler chrome */
       #leftScroll, #rightScroll{ width: auto !important; max-width:100%; box-sizing:border-box; max-height: 42vh; font-size: 13px; display: block !important; }
       /* simplify decorative rods on small screens */
@@ -323,7 +323,7 @@
       :root{ --tube-w: 136px; --tube-h: 200px; }
       .omikuji{ width:calc(100vw - 18px); }
       .stage input#symbolInput{ width:clamp(160px, 70vw, 280px); }
-      #bgStatus{ display:none; } /* save space */
+      
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -363,7 +363,6 @@
 
   <!-- background toggle -->
   <button id="bgToggle" style="position:fixed; right:14px; top:18px; z-index:20000; padding:8px 10px; border-radius:8px; background:#fffef8; border:1px solid rgba(0,0,0,.08);">背景：關</button>
-  <div id="bgStatus" style="position:fixed; right:14px; top:58px; z-index:20000; padding:6px 8px; border-radius:8px; background:#fffef8; border:1px solid rgba(0,0,0,.06); font-size:12px;">背景狀態：未知</div>
 
     <button id="test" type="button" disabled>（測試）按我也會抽</button>
     <div style="margin-top:10px; font-size:13px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
@@ -524,16 +523,16 @@
       const lines = Array.isArray(f.text) ? f.text : (f.text? [f.text] : []);
       textEl.innerHTML = `<p>${lines.join('<br>')}</p>` + (f.advice ? `<p style="margin-top:8px; color:#b3212d;">建議：${f.advice}</p>` : '');
 
-      const prob = (typeof data.proba === 'number') ? (data.proba*100).toFixed(2)+'%' : '—';
-      const thr  = (typeof data.threshold === 'number') ? data.threshold.toFixed(3) : '—';
-      const conf = (typeof f.confidence === 'number') ? f.confidence.toFixed(3) : '—';
+  const prob = (typeof data.proba === 'number') ? (data.proba*100).toFixed(2)+'%' : '—';
+  const thr  = (typeof data.threshold === 'number') ? data.threshold.toFixed(3) : '—';
+  const conf = (typeof data.confidence === 'number') ? data.confidence.toFixed(3) : '—';
       metaEl.textContent = `機率↑: ${prob}｜門檻: ${thr}｜信心: ${conf}`;
 
       // populate right scroll
       try{
         const fund = document.getElementById('fundamentals');
         const derived = document.getElementById('derivedFeatures');
-        if(fund) fund.innerHTML = `<div>模型: <strong>${data.model}</strong></div><div>預測概率: <strong>${prob}</strong></div><div>門檻: <strong>${thr}</strong></div>`;
+  if(fund) fund.innerHTML = `<div>模型: <strong>${data.model}</strong></div><div>預測概率: <strong>${prob}</strong></div><div>門檻: <strong>${thr}</strong></div><div>信心: <strong>${conf}</strong></div>`;
         if(derived){
           const df = data.derived || { 'MA_diff(3)': '0.012', 'lag1': '-0.004', 'lag3': '0.021' };
           derived.innerHTML = Object.keys(df).map(k=>`<div><strong>${k}</strong>: ${df[k]}</div>`).join('');
@@ -932,28 +931,7 @@
   try{ const stored = localStorage.getItem('pageBg'); setState(stored === null ? true : stored==='1'); }catch(e){}
     })();
 
-    // background image loader/checker (debug helper)
-    (function(){
-      const statusEl = document.getElementById('bgStatus');
-      const bg = document.getElementById('pageBg');
-      const img = new Image();
-      const url = '/static/ComfyUI_00012_.png';
-      let loaded = false;
-      img.onload = function(){
-        loaded = true;
-        if(statusEl) statusEl.textContent = '背景狀態：圖片載入成功';
-        // ensure background element has the right URL (add cache-buster)
-        if(bg) bg.style.backgroundImage = `url('${url}?v=${Date.now()}')`; 
-        // force show if hidden
-        try{ if(bg && bg.style) bg.style.display = 'block'; }catch(e){}
-      };
-      img.onerror = function(ev){
-        if(statusEl) statusEl.textContent = '背景狀態：無法載入圖片（請檢查 /static 路徑）';
-        console.warn('background image load error', ev);
-      };
-      // start loading
-      try{ img.src = url; }catch(e){ if(statusEl) statusEl.textContent = '背景狀態：載入例外'; }
-    })();
+    
   </script>
 </body>
 </html>

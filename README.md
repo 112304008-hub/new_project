@@ -28,25 +28,15 @@
 - **批次處理**：支援 S&P 500、Nasdaq-100 等指數批次建置
 
 ### ⚙️ 自動化
-- **定時更新**：可設定股票自動更新週期
-- **指數追蹤**：自動追蹤指數成分變化
-- **失敗重試**：智慧型指數退避策略
+- 全域 5 分鐘自動更新（內建）：服務啟動後，每 5 分鐘掃描 `data/` 內現有 `*_short_term_with_lag3.csv` 以受控併發更新；可在 `main.py` 的 `GLOBAL_UPDATE_INTERVAL_MIN` 與 `GLOBAL_UPDATE_CONCURRENCY` 調整。
+- 批次建置：提供 `/api/bulk_build_start`、`/api/bulk_build_status`、`/api/bulk_build_stop`。
 
 ### 🔍 監控與診斷
-- **健康檢查**：容器健康狀態監控
-- **Prometheus 指標**：完整的效能指標
-- **診斷工具**：資料統計與模型狀態查詢
+- 健康檢查：`/health`
+- 診斷工具：`/api/diagnostics`、`/api/stattests`、`/api/lag_stats`、`/api/series`、`/api/latest_features`
 
----
-<div align="center">
+> 附註：本服務僅使用「個股 CSV」（`data/{symbol}_short_term_with_lag3.csv`），不再依賴聚合檔；多數資料/統計端點需帶 `symbol` 參數。服務預設會自動執行「全域 5 分鐘更新」；如需外部排程，也可改用批次 API。專案已移除 `/api/auto/*` 端點與註冊檔。
 
-# � 股價之神 - 最小化使用指南
-
-只保留核心：FastAPI 服務 (`main.py`) 與業務邏輯 (`stock.py`)。
-
-</div>
-
----
 
 ## 1) 啟動服務（開發模式）
 
@@ -72,7 +62,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 Invoke-WebRequest -Uri "http://localhost:8000/api/build_symbol?symbol=AAPL" | ConvertFrom-Json
 ```
 
-2. 執行預測（需要 models/ 中已有已訓練模型檔 e.g. rf_pipeline.pkl / rf_threshold.pkl）
+2. 執行預測（需要 models/ 中已有已訓練模型檔 e.g. rf_pipeline.pkl / rf_threshold.pkl；symbol 必填）
 
 ```powershell
 Invoke-WebRequest -Uri "http://localhost:8000/api/draw?model=rf&symbol=AAPL" | ConvertFrom-Json
@@ -90,7 +80,64 @@ python -m scripts.dev.run_predict --symbol AAPL --model rf
 
 ---
 
+## 🧭 正式部署（Production）
+
+提供兩種方式：
+
+1) 只有後端（直接聽 8000 埠，最快測起來）
+
+```powershell
+# 在專案根目錄建置映像檔
+docker build -t new_project:latest .
+
+# 切換到 compose 目錄，只啟動 web 服務
+Set-Location infra/compose
+docker compose -f docker-compose.prod.yml up -d web
+
+# 健康檢查（服務直接在 8000）
+Invoke-WebRequest -Uri "http://localhost:8000/health"
+
+# 觀察日誌與停止
+docker compose -f docker-compose.prod.yml logs -f web
+docker compose -f docker-compose.prod.yml down
+```
+
+2) 含 Caddy 反向代理與 HTTPS（80/443）
+
+```powershell
+# 在專案根目錄建置映像檔
+docker build -t new_project:latest .
+
+# 設定必要環境變數（或改用 .env）
+$env:DOMAIN = "your-domain.example"  # 你的網域
+$env:ACME_EMAIL = "you@example.com"  # 憑證註冊 email（可選）
+# 若要保護 /api/*：
+# $env:API_KEY = "your-secret-key"
+
+# 切到 compose 目錄並啟動所有服務（web + caddy）
+Set-Location infra/compose
+docker compose -f docker-compose.prod.yml up -d
+
+# 用網域檢查健康情況
+Invoke-WebRequest -Uri "http://$env:DOMAIN/health"
+
+# 觀察日誌與停止
+docker compose -f docker-compose.prod.yml logs -f web
+docker compose -f docker-compose.prod.yml logs -f caddy
+docker compose -f docker-compose.prod.yml down
+```
+
+說明：
+- 正式 compose 會使用 named volumes 保存 `/app/data` 與 `/app/models`，重啟不會遺失資料。
+- 更新程式：重新 `docker build -t new_project:latest .` 後，再 `docker compose -f docker-compose.prod.yml up -d` 即可滾更。
+- 若要使用外部排程取代內建全域更新，可關閉 `ENABLE_GLOBAL_UPDATER` 並定期呼叫 `/api/bulk_build_start`。
+
+---
+
 ## 附註
+
+- 本服務僅使用「個股 CSV」（data/{symbol}_short_term_with_lag3.csv），不再依賴聚合檔。
+- 多數資料/統計端點皆需帶 symbol 參數（例如 /api/diagnostics?symbol=AAPL）。
 
 - 若不使用 Makefile，可直接照上述命令操作；Makefile 只是幫你把常用命令取個別名（見下）。
 - 本專案已移除批次腳本與多餘的工具腳本；如需批次或自動更新，建議改用 API（/api/build_symbol）自行外掛排程。
