@@ -290,12 +290,6 @@ GLOBAL_UPDATE_TASK: asyncio.Task | None = None
 GLOBAL_UPDATE_INTERVAL_MIN = 5
 GLOBAL_UPDATE_CONCURRENCY = 4
 
-#（已移除單股/指數持久化註冊檔；全域自動更新不需要註冊檔）
-
-#（已移除舊版 registry 載入/儲存，改為無狀態全域自動更新）
-
-#（已移除單股與指數級別 loop；改以全域自動更新迴圈統一處理）
-
 
 async def _all_symbols_loop(interval_min: int = 5, concurrency: int = 4, backoff_factor: float = 2.0, max_backoff_min: int = 30):
     """全域自動更新迴圈：每隔 interval 分鐘掃描 data/ 內所有 *_short_term_with_lag3.csv 並逐一更新。

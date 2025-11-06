@@ -22,7 +22,7 @@ if str(_ROOT) not in sys.path:
 # FastAPI test client
 from fastapi.testclient import TestClient
 
-import main as app_main
+import importlib
 import stock as stock_mod
 
 
@@ -36,13 +36,17 @@ def tmp_workspace(tmp_path_factory):
 
 @pytest.fixture(scope="session")
 def tmp_csv(tmp_workspace: Path):
-    # Create a minimal but valid CSV with required columns
+    # Create a deterministic CSV with clear >1% daily moves so y isn't all NaN
     import pandas as pd
     import numpy as np
-    n = 60
+    n = 80
+    dates = pd.date_range("2024-01-01", periods=n, freq="D")
+    # Alternate +3% and -3% daily to ensure labels exist with THRESH=1%
+    steps = np.tile([1.03, 0.97], (n // 2) + 1)[:n]
+    prices = 100 * np.cumprod(steps)
     df = pd.DataFrame({
-        "年月日": pd.date_range("2024-01-01", periods=n, freq="D"),
-        "收盤價(元)": pd.Series(100 + np.cumsum(np.random.randn(n))).round(2),
+        "年月日": dates,
+        "收盤價(元)": prices.round(2),
     })
     df.to_csv(tmp_workspace / "data" / "short_term_with_lag3.csv", index=False, encoding="utf-8-sig")
     return tmp_workspace / "data" / "short_term_with_lag3.csv"
@@ -61,20 +65,33 @@ def prepared_models(tmp_workspace: Path, tmp_csv: Path):
 
 @pytest.fixture()
 def client(tmp_workspace: Path, tmp_csv: Path, prepared_models: Path):
-    # Monkeypatch main module paths to use temp workspace
-    app_main.DATA = tmp_csv
+    # 確保 stock 指向臨時 models/data 目錄（需在 import main 之前）
+    stock_mod.MODELS_DIR = tmp_workspace / "models"
+    stock_mod.DATA_DIR = tmp_workspace / "data"
+
+    # 延遲 import main，確保 `from stock import MODELS_DIR` 會拿到上面設定
+    app_main = importlib.import_module("main")
+
+    # 設定 main 的 data 目錄（本版 API 依據 symbol 從 data/ 取檔）
     app_main.DATA_DIR = tmp_workspace / "data"
     app_main.DATA_WRITE_DIR = tmp_workspace / "data"
-    app_main.MODELS_DIR = prepared_models
-    # Ensure API key is disabled for tests
+    # 關閉 API key 保護
     app_main.API_KEY = None
-    # Also ensure stock module points to our prepared models
-    stock_mod.MODELS_DIR = prepared_models
-    # Create a couple of symbol CSVs to test list_symbols
+
+    # 準備幾個 symbol 的 CSV 用於測試（包含 >1% 的日變動，避免全為 NaN 標籤）
+    import numpy as np
     for sym in ("AAPL", "MSFT"):
+        n = 60
+        dates = pd.date_range("2024-02-01", periods=n, freq="D")
+        steps = np.tile([1.03, 0.97], (n // 2) + 1)[:n]
+        prices = 120 * np.cumprod(steps)
         df = pd.DataFrame({
-            "年月日": pd.date_range("2024-02-01", periods=10, freq="D"),
-            "收盤價(元)": [150 + i for i in range(10)],
+            "年月日": dates,
+            "收盤價(元)": prices.round(2),
         })
         df.to_csv(tmp_workspace / "data" / f"{sym}_short_term_with_lag3.csv", index=False, encoding="utf-8-sig")
+
+    # 以 AAPL 的資料重新訓練一次輕量 lr 模型，使推論使用到的特徵與該 CSV 對齊
+    stock_mod.train(str(tmp_workspace / "data" / "AAPL_short_term_with_lag3.csv"), models_to_train=["lr"])
+
     return TestClient(app_main.app)

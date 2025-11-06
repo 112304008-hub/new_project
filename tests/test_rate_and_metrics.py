@@ -1,13 +1,8 @@
-"""test_rate_and_metrics.py — Rate Limit 與 Metrics 相關測試（繁體中文說明）
+"""Rate Limit 測試
 
-內容：
-    - 人為降低 RATE_LIMIT_PER_MIN 以觸發速率限制
-    - 啟動 symbol 自動任務後檢視 Prometheus 指標是否出現 app_background_tasks
-
-目的：驗證服務端監控與保護機制可被觀測。
+保留基本的速率限制測試；Metrics 與 /api/auto/* 相關測試已移除。
 """
 import re
-import time
 
 
 def test_rate_limit_enforced_on_api_routes(client, monkeypatch):
@@ -22,17 +17,4 @@ def test_rate_limit_enforced_on_api_routes(client, monkeypatch):
     assert r2.status_code in (429, 200, 401)
 
 
-def test_metrics_background_gauge_increases(client, tmp_path, monkeypatch):
-    import main as app_main
-    # Redirect write dir and avoid real work
-    app_main.DATA_WRITE_DIR = tmp_path
-    monkeypatch.setattr(app_main, "_ensure_yf", lambda: None)
-    monkeypatch.setattr(app_main, "_build_from_yfinance", lambda symbol, out_csv: None)
-
-    # Start a symbol auto task to bump BACKGROUND_TASKS_GAUGE
-    r = client.get("/api/auto/start_symbol", params={"symbol": "METRICX", "interval": 1})
-    assert r.status_code == 200
-    # Fetch metrics; expect our custom metric name present
-    m = client.get("/metrics")
-    assert m.status_code == 200
-    assert "app_background_tasks" in m.text
+# /metrics 與 /api/auto/* 已移除，對應測試刪除

@@ -24,16 +24,11 @@ def test_version_endpoint(client):
     assert "python" in j
 
 
-def test_metrics_endpoint(client):
-    r = client.get("/metrics")
-    assert r.status_code == 200
-    # prometheus_client CONTENT_TYPE_LATEST
-    ctype = r.headers.get("content-type", "")
-    assert ctype.startswith("text/plain")
+# Prometheus /metrics 端點已移除，相關測試不再適用
 
 
 def test_series_happy_path(client):
-    r = client.get("/api/series", params={"feature": "收盤價(元)", "n": 5})
+    r = client.get("/api/series", params={"feature": "收盤價(元)", "n": 5, "symbol": "AAPL"})
     assert r.status_code == 200
     j = r.json()
     assert j["feature"] == "收盤價(元)"
@@ -42,20 +37,20 @@ def test_series_happy_path(client):
 
 
 def test_series_missing_feature_returns_404(client):
-    r = client.get("/api/series", params={"feature": "NOT_EXISTS"})
+    r = client.get("/api/series", params={"feature": "NOT_EXISTS", "symbol": "AAPL"})
     assert r.status_code == 404
     assert "找不到欄位" in r.text
 
 
 def test_latest_features_defaults_and_regex_errors(client):
-    # defaults should include at least the numeric column when no lag features exist
-    r = client.get("/api/latest_features")
+    # 需提供 symbol 或 file；此處提供現有 symbol
+    r = client.get("/api/latest_features", params={"symbol": "AAPL"})
     assert r.status_code == 200
     j = r.json()
     assert isinstance(j.get("selected_columns"), list)
     assert len(j["selected_columns"]) >= 1
     # bad regex should return 400
-    r2 = client.get("/api/latest_features", params={"pattern": "(oops"})
+    r2 = client.get("/api/latest_features", params={"pattern": "(oops", "symbol": "AAPL"})
     assert r2.status_code == 400
 
 
@@ -105,11 +100,10 @@ def test_list_symbols_prefers_write_dir(client, tmp_path):
     assert str(p_write.resolve()) == found[0]["csv"]
 
 
-def test_draw_missing_model_returns_404(client):
-    # choose a non-existing model name to trigger the 404 error path
-    r = client.get("/api/draw", params={"model": "no_such_model"})
-    assert r.status_code == 404
-    assert "未發現已訓練的模型" in r.text
+def test_draw_invalid_model_returns_422(client):
+    # 非 Enum 的 model 值會觸發 FastAPI 422 驗證
+    r = client.get("/api/draw", params={"model": "no_such_model", "symbol": "AAPL"})
+    assert r.status_code == 422
 
 
 def test_api_key_enforcement_on_api_routes(client):

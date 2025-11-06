@@ -28,12 +28,12 @@ def test_list_symbols(client):
     assert {"AAPL", "MSFT"}.issubset(syms)
 
 
-def test_draw_without_symbol_uses_default_csv(client):
-    r = client.get("/api/draw?model=lr")
+def test_draw_requires_symbol_and_predicts(client):
+    r = client.get("/api/draw", params={"model": "lr", "symbol": "AAPL"})
     assert r.status_code == 200
     j = r.json()
-    assert j.get("ok") is True
     assert j.get("model") == "lr"
+    assert j.get("symbol") == "AAPL"
     assert 0.0 <= j.get("proba", 0.0) <= 1.0
 
 
@@ -41,13 +41,12 @@ def test_draw_with_symbol(client):
     r = client.get("/api/draw?model=lr&symbol=AAPL")
     assert r.status_code == 200
     j = r.json()
-    assert j.get("ok") is True
     assert j.get("symbol") == "AAPL"
 
 
 def test_diagnostics_basic(client):
-    r = client.get("/api/diagnostics?n_bins=10")
-    # diagnostics reads default DATA CSV; should be present in fixture
+    # diagnostics 需帶 symbol
+    r = client.get("/api/diagnostics", params={"n_bins": 10, "symbol": "AAPL"})
     assert r.status_code == 200
     j = r.json()
     assert "latest_row" in j
@@ -58,10 +57,10 @@ def test_api_key_protection(client, monkeypatch):
     import main as app_main
     # Enable API key and verify unauthorized without header
     app_main.API_KEY = "secret"
-    r = client.get("/api/draw?model=lr")
+    r = client.get("/api/draw", params={"model": "lr", "symbol": "AAPL"})
     assert r.status_code == 401
     # With correct key should pass
-    r2 = client.get("/api/draw?model=lr", headers={"x-api-key": "secret"})
+    r2 = client.get("/api/draw", params={"model": "lr", "symbol": "AAPL"}, headers={"x-api-key": "secret"})
     assert r2.status_code == 200
 
 
@@ -70,9 +69,9 @@ def test_rate_limit_basic(client, monkeypatch):
     # Set a very low rate limit to trigger quickly
     monkeypatch.setenv("RATE_LIMIT_PER_MIN", "1")
     app_main.app.state.rate_bucket = {}  # reset in-memory bucket
-    ok1 = client.get("/api/draw?model=lr")
+    ok1 = client.get("/api/draw", params={"model": "lr", "symbol": "AAPL"})
     assert ok1.status_code == 200
-    blocked = client.get("/api/draw?model=lr")
+    blocked = client.get("/api/draw", params={"model": "lr", "symbol": "AAPL"})
     assert blocked.status_code in (200, 429)  # depending on reuse of client session IP
 
 

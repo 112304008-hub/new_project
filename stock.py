@@ -182,9 +182,10 @@ def predict(csv_path: Optional[Union[str, Path]] = None,
         if not Path(csv_path).exists():
             try:
                 _ensure_yf()
-                _build_from_yfinance(symbol=s, out_csv=Path(csv_path), expected_features=expected)
+                # _build_from_yfinance 不接受 expected_features 參數；僅建立基本欄位與特徵
+                _build_from_yfinance(symbol=s, out_csv=Path(csv_path))
             except Exception:
-                # fallback: let _resolve_csv_path handle missing file later
+                # fallback: 交由 _resolve_csv_path 後續處理缺檔錯誤
                 pass
 
     path = _resolve_csv_path(csv_path)
