@@ -132,6 +132,47 @@ docker compose -f docker-compose.prod.yml down
 - 更新程式：重新 `docker build -t new_project:latest .` 後，再 `docker compose -f docker-compose.prod.yml up -d` 即可滾更。
 - 若要使用外部排程取代內建全域更新，可關閉 `ENABLE_GLOBAL_UPDATER` 並定期呼叫 `/api/bulk_build_start`。
 
+## 📦 從 GHCR 拉取與啟動（完成 CI 後）
+
+> 前提：若 GHCR 套件是私有，請先 `docker login ghcr.io`；若公開則可直接拉。
+
+```powershell
+# 建議使用特定版本（tag 或 git sha）
+docker pull ghcr.io/112304008-hub/new_project/app:v0.1.0
+# 或
+docker pull ghcr.io/112304008-hub/new_project/app:<git_sha>
+
+# 執行（服務在 8000 埠）
+docker run --rm -p 8000:8000 ghcr.io/112304008-hub/new_project/app:v0.1.0
+
+# 健康檢查
+Invoke-WebRequest -Uri "http://localhost:8000/health"
+```
+
+> 註：`:latest` 只有在「打 tag」時才會由 CI 發佈；平常請用 `:<git_sha>` 或 `:<tag>` 鎖定版本。
+
+## 🛠️ 本機建置映像（兩種方式）
+
+1) 極速（重用雲端依賴層，推薦開發時使用）
+
+```powershell
+# 方式 A：一鍵腳本（建議）
+scripts\build_from_ghcr.ps1 -AppTag dev
+# 產出：new_project:dev
+
+# 方式 B：手動（直接使用 GHCR 依賴映像當 BASE_IMAGE）
+$reqHash = (Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)
+docker build --build-arg BASE_IMAGE=ghcr.io/112304008-hub/new_project/py311-deps:$reqHash --build-arg SKIP_PIP_INSTALL=true -t new_project:dev .
+```
+
+2) 備用（不依賴雲端，直接完整安裝 requirements）
+
+```powershell
+docker build -t new_project:latest .
+```
+
+> 小提醒：Windows 請先啟動 Docker Desktop（鯨魚圖示為 Running）。
+
 ---
 
 ## 附註
