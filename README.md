@@ -146,8 +146,8 @@ docker compose -f docker-compose.prod.yml down
 如何本機重用雲端依賴層做「薄層 build」：
 
 ```powershell
-# 計算 requirements 指紋（12 碼）
-$reqHash = (Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)
+# 計算 requirements 指紋（12 碼，轉小寫以符合 GHCR 標籤規範）
+$reqHash = ((Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)).ToLower()
 
 # 使用 GHCR 的 deps 當 BASE_IMAGE，並跳過 pip 安裝
 docker build -f Dockerfile `
@@ -189,7 +189,7 @@ scripts\build_from_ghcr.ps1 -AppTag dev
 # 產出：new_project:dev
 
 # 方式 B：手動（直接使用 GHCR 依賴映像當 BASE_IMAGE）
-$reqHash = (Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)
+$reqHash = ((Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)).ToLower()
 docker build --build-arg BASE_IMAGE=ghcr.io/112304008-hub/new_project/py311-deps:$reqHash --build-arg SKIP_PIP_INSTALL=true -t new_project:dev .
 ```
 
@@ -222,7 +222,7 @@ docker build -t new_project:latest .
 
 ```powershell
 # 1) 以 requirements.txt 的雜湊值當作標籤，建立依賴映像
-$reqHash = (Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)
+$reqHash = ((Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)).ToLower()
 docker build -f Dockerfile.deps --build-arg REQUIREMENTS_SHA=$reqHash -t new_project/py311-deps:$reqHash .
 
 # 2) 使用此依賴映像當作基底，並跳過再次安裝依賴
@@ -269,7 +269,7 @@ Invoke-WebRequest -Uri "http://localhost:8000/health"
 在本機重建 App 但重用 GHCR 依賴層（加速 build）：
 
 ```powershell
-$reqHash = (Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)
+$reqHash = ((Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)).ToLower()
 docker build --build-arg BASE_IMAGE=ghcr.io/112304008-hub/new_project/py311-deps:$reqHash --build-arg SKIP_PIP_INSTALL=true -t new_project:dev .
 ```
 
