@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1.7-labs
-FROM python:3.11-slim
+# Allow swapping in a prebuilt base image that already has dependencies installed
+ARG BASE_IMAGE=python:3.11-slim
+FROM ${BASE_IMAGE}
 
 # Build metadata args (can be overridden at build time)
 ARG APP_GIT_SHA=UNKNOWN
@@ -14,13 +16,19 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Copy requirements and install first to benefit from Docker layer caching
+ARG SKIP_PIP_INSTALL=false
 COPY requirements.txt ./
-RUN python -m pip install --upgrade pip setuptools wheel
-# Install uv (fast Python package installer) and use its cache
-RUN --mount=type=cache,target=/root/.cache/pip \
+RUN --mount=type=cache,target=/root/.cache/uv <<'EOF'
+set -e
+if [ "${SKIP_PIP_INSTALL}" = "true" ]; then
+    echo "[deps] Skipping dependency installation (SKIP_PIP_INSTALL=true)"
+else
+    echo "[deps] Installing Python dependencies via uv..."
+    python -m pip install --upgrade pip setuptools wheel
     pip install uv
-RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements.txt
+fi
+EOF
 
 # Copy application code (exclude data/models here to keep layer cache stable)
 # - root Python files and runtime scripts
@@ -31,14 +39,10 @@ COPY static/ /app/static/
 # - optional utility scripts (kept for convenience)
 COPY scripts/ /app/scripts/
 
-# Copy data and models in separate layers so changes don't invalidate app code cache
-COPY data/ /app/data/
-COPY models/ /app/models/
-
 EXPOSE 8000
 
 # Simplified single-line healthcheck: success if HTTP 200
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=2).status==200 else 1)" || exit 1
+    CMD python -c "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=2).status==200 else 1)" 
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

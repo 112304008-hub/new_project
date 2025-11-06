@@ -145,6 +145,66 @@ docker compose -f docker-compose.prod.yml down
 ---
 
 ## Makefile 是什麼？可以刪嗎？
+### ⚡ 加速 Docker 建置：預先烤好的依賴層（強烈推薦）
+
+若每次 `docker build` 都要重新安裝 `requirements.txt` 太慢，您可以先建一個「已安裝好所有套件」的基底映像，之後只要複製程式碼就能秒級完成建置。
+
+步驟（PowerShell）：
+
+```powershell
+# 1) 以 requirements.txt 的雜湊值當作標籤，建立依賴映像
+$reqHash = (Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)
+docker build -f Dockerfile.deps --build-arg REQUIREMENTS_SHA=$reqHash -t new_project/py311-deps:$reqHash .
+
+# 2) 使用此依賴映像當作基底，並跳過再次安裝依賴
+docker build --build-arg BASE_IMAGE=new_project/py311-deps:$reqHash --build-arg SKIP_PIP_INSTALL=true -t new_project:latest .
+```
+
+說明：
+- `Dockerfile.deps` 會把 `requirements.txt` 裝進基底映像；只要需求沒變，這層可以長期重用。
+- 主 `Dockerfile` 新增 `BASE_IMAGE` 與 `SKIP_PIP_INSTALL` 參數；設為上述依賴映像 + 跳過安裝，即可極速建置。
+- 建議把依賴映像推到你的私有/公有 Registry，團隊成員即可直接重用（例如 `ghcr.io/yourorg/new_project/py311-deps:$reqHash`）。
+
+### 🏷️ 使用 GHCR（GitHub Container Registry）映像
+
+本專案的 CI（GitHub Actions）會自動將映像推到 GHCR：
+
+- 依賴映像（已安裝 requirements）：
+  - `ghcr.io/<你的帳號>/new_project/py311-deps:<12位requirements雜湊>`
+  - 用途：加速後續 App build（作為 BASE_IMAGE）
+- App 映像：
+  - 永遠會有：`ghcr.io/<你的帳號>/new_project/app:<git_sha>`
+  - 只有在「打 tag」時，才會另推：`ghcr.io/<你的帳號>/new_project/app:latest` 與 `app:<tag>`
+
+注意：第一次用 GHCR，請在 GitHub 帳號 Settings > Packages 啟用 GHCR；若要公開下載，記得把 Package 設為 Public。
+
+拉取與運行（PowerShell）：
+
+```powershell
+# 若是公開套件可直接拉，若為私有請先： docker login ghcr.io
+# 1) 下載標記為 latest（僅 tag 釋出時更新）
+docker pull ghcr.io/112304008-hub/new_project/app:latest
+
+# 2) 或下載特定版本（例如標籤 v1.2.3 或特定 git SHA）
+docker pull ghcr.io/112304008-hub/new_project/app:v1.2.3
+# 或
+docker pull ghcr.io/112304008-hub/new_project/app:<git_sha>
+
+# 3) 執行（聽 8000 埠）
+docker run --rm -p 8000:8000 ghcr.io/112304008-hub/new_project/app:latest
+
+# 健康檢查
+Invoke-WebRequest -Uri "http://localhost:8000/health"
+```
+
+在本機重建 App 但重用 GHCR 依賴層（加速 build）：
+
+```powershell
+$reqHash = (Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)
+docker build --build-arg BASE_IMAGE=ghcr.io/112304008-hub/new_project/py311-deps:$reqHash --build-arg SKIP_PIP_INSTALL=true -t new_project:dev .
+```
+
+> :latest 只有在打 tag 時才會更新；平時請使用 `app:<git_sha>` 或 `app:<tag>` 來鎖定版本。
 
 Makefile 只是把常用命令封裝成短命令（例如 `make dev` 等同 `uvicorn main:app --reload`）。
 
