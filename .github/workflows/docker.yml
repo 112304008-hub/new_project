@@ -62,6 +62,13 @@ jobs:
           echo "DEPS_IMAGE=$DEPS_IMAGE" | tee -a $GITHUB_OUTPUT
           echo "APP_TAGS=$APP_TAGS" | tee -a $GITHUB_OUTPUT
 
+      - name: Compute build time (UTC)
+        id: bt
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" | tee -a "$GITHUB_OUTPUT"
+
       - name: Build and push deps image (Dockerfile.deps)
         uses: docker/build-push-action@v6
         with:
@@ -86,6 +93,6 @@ jobs:
             BASE_IMAGE=${{ steps.meta.outputs.DEPS_IMAGE }}
             SKIP_PIP_INSTALL=true
             APP_GIT_SHA=${{ github.sha }}
-            APP_BUILD_TIME=${{ github.run_started_at }}
+            APP_BUILD_TIME=${{ steps.bt.outputs.BUILD_TIME }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/buildcache:app
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/buildcache:app,mode=max

@@ -40,7 +40,6 @@
 
 ## 1) 啟動服務（開發模式）
 
-```powershell
 # 建立虛擬環境並安裝依賴（如尚未安裝）
 python -m venv .venv
 . .\.venv\Scripts\Activate.ps1
@@ -104,7 +103,6 @@ docker compose -f docker-compose.prod.yml down
 
 2) 含 Caddy 反向代理與 HTTPS（80/443）
 
-```powershell
 # 在專案根目錄建置映像檔
 docker build -t new_project:latest .
 
@@ -134,19 +132,16 @@ docker compose -f docker-compose.prod.yml down
 
 ## � CI/CD（GitHub Actions）與雲端依賴層
 
-本專案已內建兩條工作流來加速 Docker 建置並自動發佈映像：
+本專案提供單一工作流（`.github/workflows/docker.yml`）來同時處理「依賴層（deps）」與「應用層（app）」的建置與發佈：
 
-- 依賴層（deps）：`.github/workflows/deps.yml`
-  - 觸發：`requirements.txt` 或 `Dockerfile.deps` 變動、手動觸發
-  - 作法：計算 `requirements.txt` 的 SHA-12 指紋，建置並推送
-    - `ghcr.io/<owner>/<repo>/py311-deps:<sha12>`
-- 應用層（app）：`.github/workflows/app.yml`
-  - 觸發：push 到 `main`、建立 tag、手動觸發
-  - 作法：先跑 pytest，綠燈後建置應用映像，直接使用上方 deps 當 `BASE_IMAGE`，並設 `SKIP_PIP_INSTALL=true` 跳過安裝，加速建置
-    - 推送標籤：
-      - `ghcr.io/<owner>/<repo>/app:<git_sha>`（每次 build 都有）
-      - `:latest`（僅 main 分支）
-      - `:<tag>`（當你打 tag 時）
+- 依賴層（deps）：依 `requirements.txt` 計算 SHA-12 指紋，建置並推送
+  - 產物：`ghcr.io/<owner>/<repo>/py311-deps:<sha12>`
+- 應用層（app）：以 deps 當 `BASE_IMAGE`，並設 `SKIP_PIP_INSTALL=true` 跳過安裝，加速建置
+  - 觸發：push 到 `main`、建立 tag、或手動觸發
+  - 推送標籤：
+    - `ghcr.io/<owner>/<repo>/app:<git_sha>`（每次 build 都有）
+    - `:latest`（僅 tag 釋出時）
+    - `:<tag>`（當你打 tag 時）
 
 如何本機重用雲端依賴層做「薄層 build」：
 
