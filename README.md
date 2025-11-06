@@ -130,7 +130,7 @@ docker compose -f docker-compose.prod.yml down
 - 更新程式：重新 `docker build -t new_project:latest .` 後，再 `docker compose -f docker-compose.prod.yml up -d` 即可滾更。
 - 若要使用外部排程取代內建全域更新，可關閉 `ENABLE_GLOBAL_UPDATER` 並定期呼叫 `/api/bulk_build_start`。
 
-## � CI/CD（GitHub Actions）與雲端依賴層
+## 🚀 CI/CD（GitHub Actions）與雲端依賴層
 
 本專案提供單一工作流（`.github/workflows/docker.yml`）來同時處理「依賴層（deps）」與「應用層（app）」的建置與發佈：
 
@@ -160,7 +160,7 @@ docker build -f Dockerfile `
 - 若 GHCR 套件是私有，先 `docker login ghcr.io`（需要 PAT，權限含 Packages:read/write）。
 - 只要 `requirements.txt` 沒變，`py311-deps:<sha12>` 可長期重用，App 重建只需幾秒。
 
-## �📦 從 GHCR 拉取與啟動（完成 CI 後）
+## 📦 從 GHCR 拉取與啟動（完成 CI 後）
 
 > 前提：若 GHCR 套件是私有，請先 `docker login ghcr.io`；若公開則可直接拉。
 
