@@ -206,6 +206,14 @@ docker build --build-arg BASE_IMAGE=ghcr.io/112304008-hub/new_project/py311-deps
 
 > :latest 只有在打 tag 時才會更新；平時請使用 `app:<git_sha>` 或 `app:<tag>` 來鎖定版本。
 
+也可以使用腳本一鍵拉依賴並建置（PowerShell）：
+
+```powershell
+# 在專案根目錄執行
+scripts\build_from_ghcr.ps1 -AppTag dev
+# 產生的映像為 new_project:dev
+```
+
 Makefile 只是把常用命令封裝成短命令（例如 `make dev` 等同 `uvicorn main:app --reload`）。
 
 - 保留的好處：
