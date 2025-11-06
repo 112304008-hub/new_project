@@ -132,7 +132,40 @@ docker compose -f docker-compose.prod.yml down
 - 更新程式：重新 `docker build -t new_project:latest .` 後，再 `docker compose -f docker-compose.prod.yml up -d` 即可滾更。
 - 若要使用外部排程取代內建全域更新，可關閉 `ENABLE_GLOBAL_UPDATER` 並定期呼叫 `/api/bulk_build_start`。
 
-## 📦 從 GHCR 拉取與啟動（完成 CI 後）
+## � CI/CD（GitHub Actions）與雲端依賴層
+
+本專案已內建兩條工作流來加速 Docker 建置並自動發佈映像：
+
+- 依賴層（deps）：`.github/workflows/deps.yml`
+  - 觸發：`requirements.txt` 或 `Dockerfile.deps` 變動、手動觸發
+  - 作法：計算 `requirements.txt` 的 SHA-12 指紋，建置並推送
+    - `ghcr.io/<owner>/<repo>/py311-deps:<sha12>`
+- 應用層（app）：`.github/workflows/app.yml`
+  - 觸發：push 到 `main`、建立 tag、手動觸發
+  - 作法：先跑 pytest，綠燈後建置應用映像，直接使用上方 deps 當 `BASE_IMAGE`，並設 `SKIP_PIP_INSTALL=true` 跳過安裝，加速建置
+    - 推送標籤：
+      - `ghcr.io/<owner>/<repo>/app:<git_sha>`（每次 build 都有）
+      - `:latest`（僅 main 分支）
+      - `:<tag>`（當你打 tag 時）
+
+如何本機重用雲端依賴層做「薄層 build」：
+
+```powershell
+# 計算 requirements 指紋（12 碼）
+$reqHash = (Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)
+
+# 使用 GHCR 的 deps 當 BASE_IMAGE，並跳過 pip 安裝
+docker build -f Dockerfile `
+  --build-arg BASE_IMAGE=ghcr.io/112304008-hub/new_project/py311-deps:$reqHash `
+  --build-arg SKIP_PIP_INSTALL=true `
+  -t new_project:dev .
+```
+
+小提醒：
+- 若 GHCR 套件是私有，先 `docker login ghcr.io`（需要 PAT，權限含 Packages:read/write）。
+- 只要 `requirements.txt` 沒變，`py311-deps:<sha12>` 可長期重用，App 重建只需幾秒。
+
+## �📦 從 GHCR 拉取與啟動（完成 CI 後）
 
 > 前提：若 GHCR 套件是私有，請先 `docker login ghcr.io`；若公開則可直接拉。
 

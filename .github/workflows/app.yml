@@ -9,6 +9,7 @@ on:
 permissions:
   contents: read
   packages: write
+  actions: write
 
 concurrency:
   group: app-${{ github.ref }}
@@ -74,6 +75,23 @@ jobs:
             TAG_NAME="${REF#refs/tags/}"
             echo "tag_alias=ghcr.io/$OWNER/$REPO/app:${TAG_NAME}" >> $GITHUB_OUTPUT
           fi
+
+      - name: Ensure deps image exists (build & push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.deps
+          push: true
+          tags: ${{ steps.meta.outputs.deps }}
+          labels: |
+            org.opencontainers.image.source=${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=py311-deps
+            org.fra.deps.sha12=${{ steps.sha.outputs.sha12 }}
+          build-args: |
+            REQUIREMENTS_SHA=${{ steps.sha.outputs.sha12 }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Build and push app image
         uses: docker/build-push-action@v6
