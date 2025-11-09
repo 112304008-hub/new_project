@@ -75,13 +75,21 @@ APP_BUILD_TIME = os.getenv("APP_BUILD_TIME", "UNKNOWN")
 API_KEY = os.getenv("API_KEY")  # optional
 CSV_ENCODING = "utf-8-sig"
 
-# Minimal conditional logging: enable only when LOG_LEVEL is set; otherwise stay silent
-# lvl = os.getenv("LOG_LEVEL")
-# logger = logging.getLogger("app")
-# if lvl:
-#     logging.basicConfig(level=lvl, format="ts=%(asctime)s level=%(levelname)s msg=%(message)s module=%(module)s")
-# else:
-#     logger.disabled = True
+"""Logging 初始化：
+預設使用環境變數 LOG_LEVEL（未設定時為 INFO）。
+這裡主動建立 basicConfig，確保在 Docker 容器中透過 `docker logs -f` 能看到：
+ 1. 啟動階段訊息（startup/global updater prints）
+ 2. API 路由的自訂 logging（例如 /api/draw）
+如需更詳細 uvicorn access log，可在 Docker CMD 加上 `--log-level` 或設置 LOG_LEVEL=DEBUG。
+"""
+_lvl = os.getenv("LOG_LEVEL", "INFO").upper()
+_level = getattr(logging, _lvl, logging.INFO)
+logging.basicConfig(
+    level=_level,
+    format="ts=%(asctime)s level=%(levelname)s logger=%(name)s msg=%(message)s module=%(module)s"
+)
+logger = logging.getLogger("app")
+logger.info(f"[init] logging initialized level={_lvl}")
 
 # Metrics（精簡版）：移除 Prometheus，僅保留結構化日誌與 /health
 

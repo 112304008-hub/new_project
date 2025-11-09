@@ -1,11 +1,11 @@
 ﻿# syntax=docker/dockerfile:1.7-labs
-# Base image can be overridden to use a prebuilt PyTorch image from Docker Hub, e.g. pytorch/pytorch:2.4.1-cpu
+# Base image can be overridden (e.g., pytorch/pytorch:2.4.1-cpu or prebuilt deps image)
 
-### ???孵???1嚗?閮勗??冽?摰?BASE_IMAGE嚗?閮剔 pytorch/pytorch:2.4.1-cpu嚗??build-arg 閬神??CUDA ??
-ARG BASE_IMAGE=pytorch/pytorch:2.4.1-cuda11.8-cudnn8-runtime
+# 1) Allow overriding base image (CPU/GPU or a pre-baked deps image)
+ARG BASE_IMAGE=pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime
 FROM ${BASE_IMAGE}
 
-### ?? 靽??航蕭皞舀?metadata嚗憛恬?
+# Metadata injected by CI/CD (optional)
 ARG APP_GIT_SHA=UNKNOWN
 ARG APP_BUILD_TIME=UNKNOWN
 
@@ -13,11 +13,12 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     APP_GIT_SHA=${APP_GIT_SHA} \
     APP_BUILD_TIME=${APP_BUILD_TIME} \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    LOG_LEVEL=INFO
 
 WORKDIR /app
 
-### ???孵???2嚗??SKIP_PIP_INSTALL ??TORCH_FILTER嚗?雿雿輻??torch ??撱?base image ???? torch
+# 2) Optional dependency install (skip when BASE_IMAGE already contains deps)
 ARG SKIP_PIP_INSTALL=false
 ARG TORCH_FILTER=true
 COPY requirements.txt ./
@@ -56,15 +57,16 @@ PY
 fi
 EOF
 
-### ? 銴ˊ?蝔?蝔?蝣潸???鞈?嚗???Docker layer 敹怠?嚗?
-COPY *.py /app/
+# 3) Copy only runtime essentials (avoid bundling experimental scripts)
+COPY main.py /app/main.py
+COPY stock.py /app/stock.py
 COPY template2.html /app/
 COPY static/ /app/static/
-COPY scripts/ /app/scripts/
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD python -c "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=2).status==200 else 1)"
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 顯式指定 log level 讓啟動 & access logs 出現在 docker logs
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]

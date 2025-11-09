@@ -58,14 +58,8 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 1. 建置單一股票 CSV（若不存在會自動用 yfinance 下載並產生特徵）
 
 ```powershell
-Invoke-WebRequest -Uri "http://localhost:8000/api/build_symbol?symbol=AAPL" | ConvertFrom-Json
 ```
 
-2. 執行預測（需要 models/ 中已有已訓練模型檔 e.g. rf_pipeline.pkl / rf_threshold.pkl；symbol 必填）
-
-```powershell
-Invoke-WebRequest -Uri "http://localhost:8000/api/draw?model=rf&symbol=AAPL" | ConvertFrom-Json
-```
 
 ---
 
@@ -82,11 +76,9 @@ python -m scripts.dev.run_predict --symbol AAPL --model rf
 ## 🧭 正式部署（Production）
 
 提供兩種方式：
-
 1) 只有後端（直接聽 8000 埠，最快測起來）
 
 ```powershell
-# 在專案根目錄建置映像檔
 docker build -t new_project:latest .
 
 # 切換到 compose 目錄，只啟動 web 服務
@@ -135,7 +127,6 @@ docker compose -f docker-compose.prod.yml down
 本專案提供單一工作流（`.github/workflows/docker.yml`）來同時處理「依賴層（deps）」與「應用層（app）」的建置與發佈：
 
 - 依賴層（deps）：依 `requirements.txt` 計算 SHA-12 指紋，建置並推送
-  - 產物：`ghcr.io/<owner>/<repo>/py311-deps:<sha12>`
 - 應用層（app）：以 deps 當 `BASE_IMAGE`，並設 `SKIP_PIP_INSTALL=true` 跳過安裝，加速建置
   - 觸發：push 到 `main`、建立 tag、或手動觸發
   - 推送標籤：
@@ -159,15 +150,8 @@ docker build -f Dockerfile `
 小提醒：
 - 若 GHCR 套件是私有，先 `docker login ghcr.io`（需要 PAT，權限含 Packages:read/write）。
 - 只要 `requirements.txt` 沒變，`py311-deps:<sha12>` 可長期重用，App 重建只需幾秒。
-
-## 📦 從 GHCR 拉取與啟動（完成 CI 後）
-
-> 前提：若 GHCR 套件是私有，請先 `docker login ghcr.io`；若公開則可直接拉。
-
-```powershell
 # 建議使用特定版本（tag 或 git sha）
 docker pull ghcr.io/112304008-hub/new_project/app:v0.1.0
-# 或
 docker pull ghcr.io/112304008-hub/new_project/app:<git_sha>
 
 # 執行（服務在 8000 埠）
