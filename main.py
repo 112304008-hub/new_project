@@ -293,7 +293,21 @@ def _ensure_symbol_csv(symbol: str) -> Path:
 """
 
 # 全域（所有現有 CSV）自動更新任務：每 5 分鐘掃描 data/ 並更新，避免單股細粒度控制的複雜度
-ENABLE_GLOBAL_UPDATER = True
+# 允許以環境變數 ENABLE_GLOBAL_UPDATER 控制（'false' / '0' / 'no' / 'off' 為停用）
+def _parse_bool_env(name: str, default: bool) -> bool:
+    val = os.getenv(name)
+    if val is None:
+        return default
+    v = val.strip().lower()
+    if v in ("0", "false", "no", "off"):  # 明確停用集合
+        return False
+    if v in ("1", "true", "yes", "on"):
+        return True
+    # 非法值回退預設並記錄
+    logging.getLogger("app").warning(f"[config] Unknown boolean for {name}={val!r}, fallback to {default}")
+    return default
+
+ENABLE_GLOBAL_UPDATER = _parse_bool_env("ENABLE_GLOBAL_UPDATER", True)
 GLOBAL_UPDATE_TASK: asyncio.Task | None = None
 GLOBAL_UPDATE_INTERVAL_MIN = 5
 GLOBAL_UPDATE_CONCURRENCY = 4

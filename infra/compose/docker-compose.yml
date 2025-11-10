@@ -1,9 +1,8 @@
 services:
   web:
     build: ../../
-    container_name: newproject_web
     ports:
-      - "8000:8000"
+      - "${APP_PORT:-8001}:8000"
     volumes:
       - ../../:/app:rw
     environment:

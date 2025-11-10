@@ -58,6 +58,25 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 1. 建置單一股票 CSV（若不存在會自動用 yfinance 下載並產生特徵）
 
 ```powershell
+# 產生或更新 AAPL 的特徵 CSV
+Invoke-RestMethod -Method GET -Uri "http://localhost:8000/api/build_symbol?symbol=AAPL"
+```
+
+2. 取得預測結果（簡潔版）
+
+```powershell
+# 使用隨機森林模型 (rf) 預測 AAPL
+Invoke-RestMethod -Method GET -Uri "http://localhost:8000/api/predict?symbol=AAPL&model=rf"
+```
+
+更多：
+
+```powershell
+# 抽籤格式（含 threshold 與信心度）
+Invoke-RestMethod -Method GET -Uri "http://localhost:8000/api/draw?symbol=AAPL&model=rf"
+
+# 列出目前有資料的所有 symbols
+Invoke-RestMethod -Method GET -Uri "http://localhost:8000/api/list_symbols"
 ```
 
 
@@ -76,21 +95,80 @@ python -m scripts.dev.run_predict --symbol AAPL --model rf
 ## 🧭 正式部署（Production）
 
 提供兩種方式：
-1) 只有後端（直接聽 8000 埠，最快測起來）
+1) 只有後端（直接聽 APP_PORT，預設 8001，最快測起來）
 
 ```powershell
+# 最短可跑版本（保證可用；可直接複製貼上）
+docker build -f C:\Users\runyu\OneDrive\桌面\new-project\Dockerfile -t new_project:latest C:\Users\runyu\OneDrive\桌面\new-project
+Set-Location C:\Users\runyu\OneDrive\桌面\new-project\infra\compose
+docker compose -f docker-compose.prod.yml up -d web
+$port = if ($env:APP_PORT) { $env:APP_PORT } else { 8001 }
+for ($i=0; $i -lt 8; $i++) { try { Invoke-WebRequest -Uri "http://localhost:$port/health" -TimeoutSec 3; break } catch { Start-Sleep -Seconds 2 } }
+
+# 或者一鍵腳本（從任何目錄都可）：
+# powershell -File .\infra\compose\run_web.ps1
+
+# 先拉取基底映像（必要）
+docker pull pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime
+
+# 再建置 App 映像（請在專案「根目錄」執行 docker build；或用 infra/compose/run_web.ps1 自動完成）
 docker build -t new_project:latest .
+# 從任何目錄建置（絕對路徑，避免目錄錯誤）
+docker build -f C:\Users\runyu\OneDrive\桌面\new-project\Dockerfile -t new_project:latest C:\Users\runyu\OneDrive\桌面\new-project
+# 若你不確定目前所在路徑，可直接執行（從任何目錄）：
+# powershell -File .\infra\compose\run_web.ps1
 
 # 切換到 compose 目錄，只啟動 web 服務
 Set-Location infra/compose
-docker compose -f docker-compose.prod.yml up -d web
+docker compose -f docker-compose.prod.yml up -d web  # 若失敗請確認上一行沒有重複執行造成路徑疊加
 
-# 健康檢查（服務直接在 8000）
-Invoke-WebRequest -Uri "http://localhost:8000/health"
+# （可選）自訂主機埠（預設 8001），例如改為 8080：
+# $env:APP_PORT = 8080
+
+# 健康檢查（PowerShell 5.1 友善寫法；預設走 http://localhost:8001/health）
+$port = if ($env:APP_PORT) { $env:APP_PORT } else { 8001 }
+Invoke-WebRequest -Uri "http://localhost:$port/health"
+# 若剛啟動偶發 "連接意外關閉"，可使用簡易重試：
+for ($i=0; $i -lt 8; $i++) { try { Invoke-WebRequest -Uri "http://localhost:$port/health" -TimeoutSec 3; break } catch { Start-Sleep -Seconds 2 } }
 
 # 觀察日誌與停止
 docker compose -f docker-compose.prod.yml logs -f web
 docker compose -f docker-compose.prod.yml down
+
+### 容器名稱衝突處理
+
+若看到錯誤：`Error when allocating new name: Conflict. The container name "..." is already in use`，表示有舊容器尚未移除。
+
+現行 compose 未再強制固定 `container_name`，常見的自動名稱可能為：`new-project-web-1`、`new-project-caddy-1` 或 `compose-web-1` 等（依你專案資料夾與 Docker Desktop 版本而異）。
+
+請勿在 PowerShell 直接貼上 Markdown 的三個反引號 ``` （那只是 README 格式），只要貼指令本身即可。
+
+快速清理方式（自動偵測並移除所有名稱含 new_project 或 newproject 的容器）：
+```powershell
+# 列出相關容器
+docker ps -a --format "table {{.ID}}\t{{.Names}}\t{{.Status}}" | Select-String new_project
+docker ps -a --format "table {{.ID}}\t{{.Names}}\t{{.Status}}" | Select-String newproject
+
+# 停止並移除（動態）
+docker ps -a --format "{{.Names}}" | Select-String new_project | ForEach-Object { docker stop $_.Line 2>$null; docker rm $_.Line 2>$null }
+docker ps -a --format "{{.Names}}" | Select-String newproject   | ForEach-Object { docker stop $_.Line 2>$null; docker rm $_.Line 2>$null }
+
+# 重新啟動 web（僅後端）
+docker compose -f docker-compose.prod.yml up -d web
+```
+
+或使用提供的腳本：
+```powershell
+Set-Location infra/compose
+./cleanup_containers.ps1
+docker compose -f docker-compose.prod.yml up -d web
+```
+
+若只想確認名稱：
+```powershell
+docker ps -a --format "{{.Names}}" | Select-String new_project
+docker ps -a --format "{{.Names}}" | Select-String newproject
+```
 ```
 
 2) 含 Caddy 反向代理與 HTTPS（80/443）
@@ -106,9 +184,11 @@ $env:ACME_EMAIL = "you@example.com"  # 憑證註冊 email（可選）
 
 # 切到 compose 目錄並啟動所有服務（web + caddy）
 Set-Location infra/compose
+# 可選：複製並編輯 .env（避免 DOMAIN 未設置的警告）
+# Copy-Item .env.example .env -ErrorAction SilentlyContinue
 docker compose -f docker-compose.prod.yml up -d
 
-# 用網域檢查健康情況
+# 用網域檢查健康情況（走 Caddy 80/443，不受 APP_PORT 影響）
 Invoke-WebRequest -Uri "http://$env:DOMAIN/health"
 
 # 觀察日誌與停止
@@ -122,154 +202,137 @@ docker compose -f docker-compose.prod.yml down
 - 更新程式：重新 `docker build -t new_project:latest .` 後，再 `docker compose -f docker-compose.prod.yml up -d` 即可滾更。
 - 若要使用外部排程取代內建全域更新，可關閉 `ENABLE_GLOBAL_UPDATER` 並定期呼叫 `/api/bulk_build_start`。
 
-## 🚀 CI/CD（GitHub Actions）與雲端依賴層
+## 🚀 CI/CD（GitHub Actions）
 
-本專案提供單一工作流（`.github/workflows/docker.yml`）來同時處理「依賴層（deps）」與「應用層（app）」的建置與發佈：
+（簡化）目前不使用 GHCR 發佈映像，相關指引已移除。若未來需要，可再加入 CI 工作流與 Registry 配置說明。
+## 🚢 Docker 建置與執行（開發/測試）
 
-- 依賴層（deps）：依 `requirements.txt` 計算 SHA-12 指紋，建置並推送
-- 應用層（app）：以 deps 當 `BASE_IMAGE`，並設 `SKIP_PIP_INSTALL=true` 跳過安裝，加速建置
-  - 觸發：push 到 `main`、建立 tag、或手動觸發
-  - 推送標籤：
-    - `ghcr.io/<owner>/<repo>/app:<git_sha>`（每次 build 都有）
-    - `:latest`（僅 tag 釋出時）
-    - `:<tag>`（當你打 tag 時）
+Dockerfile 預設使用基底映像：`pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime`
 
-如何本機重用雲端依賴層做「薄層 build」：
+建置前請先顯式拉取基底映像（避免網路或 mirror 造成的拉取異常）：
 
 ```powershell
-# 計算 requirements 指紋（12 碼，轉小寫以符合 GHCR 標籤規範）
-$reqHash = ((Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)).ToLower()
-
-# 使用 GHCR 的 deps 當 BASE_IMAGE，並跳過 pip 安裝
-docker build -f Dockerfile `
-  --build-arg BASE_IMAGE=ghcr.io/112304008-hub/new_project/py311-deps:$reqHash `
-  --build-arg SKIP_PIP_INSTALL=true `
-  -t new_project:dev .
+docker pull pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime
 ```
 
-小提醒：
-- 若 GHCR 套件是私有，先 `docker login ghcr.io`（需要 PAT，權限含 Packages:read/write）。
-- 只要 `requirements.txt` 沒變，`py311-deps:<sha12>` 可長期重用，App 重建只需幾秒。
-# 建議使用特定版本（tag 或 git sha）
-docker pull ghcr.io/112304008-hub/new_project/app:v0.1.0
-docker pull ghcr.io/112304008-hub/new_project/app:<git_sha>
-
-# 執行（服務在 8000 埠）
-docker run --rm -p 8000:8000 ghcr.io/112304008-hub/new_project/app:v0.1.0
-
-# 健康檢查
-Invoke-WebRequest -Uri "http://localhost:8000/health"
-```
-
-> 註：`:latest` 只有在「打 tag」時才會由 CI 發佈；平常請用 `:<git_sha>` 或 `:<tag>` 鎖定版本。
-
-## 🛠️ 本機建置映像（兩種方式）
-
-1) 極速（重用雲端依賴層，推薦開發時使用）
+接著建置與執行：
 
 ```powershell
-# 方式 A：一鍵腳本（建議）
-scripts\build_from_ghcr.ps1 -AppTag dev
-# 產出：new_project:dev
+# 建置（預設 GPU Runtime 基底；會自動安裝 requirements.txt，並略過 torch/torchvision/torchaudio）
+docker build -t new_project:dev .
 
-# 方式 B：手動（直接使用 GHCR 依賴映像當 BASE_IMAGE）
-$reqHash = ((Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)).ToLower()
-docker build --build-arg BASE_IMAGE=ghcr.io/112304008-hub/new_project/py311-deps:$reqHash --build-arg SKIP_PIP_INSTALL=true -t new_project:dev .
-```
+# 執行（容器內固定使用 8000；若主機 8000 已被占用，改用 8001 或其他）
+docker run --rm -p 8001:8000 --name stock-ai new_project:dev
 
-2) 備用（不依賴雲端，直接完整安裝 requirements）
+# 檢查健康
+Invoke-WebRequest -Uri "http://localhost:8001/health"
+
+# 追蹤日誌
+docker logs -f stock-ai
+
+# 停止容器
+docker stop stock-ai
+
+### 常見問題（Troubleshooting）
+
+若出現錯誤：`Bind for 0.0.0.0:8000 failed: port is already allocated`
+
+表示主機的 8000 埠已被其他程式或容器占用，處理方式：
+
+1) 直接改用其他主機埠（最簡單）：
 
 ```powershell
-docker build -t new_project:latest .
+docker run --rm -p 8001:8000 --name stock-ai new_project:dev
+Invoke-WebRequest -Uri "http://localhost:8001/health"
 ```
 
-> 小提醒：Windows 請先啟動 Docker Desktop（鯨魚圖示為 Running）。
+2) 找出並停止占用 8000 的容器：
+
+```powershell
+docker ps --filter "publish=8000" --format "table {{.ID}}\t{{.Names}}\t{{.Ports}}"
+# 停止該容器
+docker stop <容器ID或名稱>
+```
+
+3) 若是本機程式佔用（非容器），查詢 PID 並結束：
+
+```powershell
+netstat -ano | Select-String ":8000"
+taskkill /PID <PID> /F
+```
+
+#### 健康檢查連線被關閉 / 8001 連不上
+
+檢查 `docker ps` 的埠對映；若顯示 `0.0.0.0:8080->8000/tcp`，代表主機埠其實是 8080，你需改用：
+```powershell
+Invoke-WebRequest -Uri "http://localhost:8080/health"
+```
+常見原因：
+- 你先前設定了 `$env:APP_PORT = 8080`，後面健檢仍打 8001。
+- 重新 up 之前忘記關閉舊容器，使你混淆目前使用的主機埠。
+
+#### 想暫時停用全域自動更新（GLOBAL UPDATER）
+
+現在可用環境變數關閉：
+```powershell
+$env:ENABLE_GLOBAL_UPDATER = "false"
+docker compose -f docker-compose.prod.yml up -d web
+```
+或在 `docker-compose.prod.yml` 的 `web.environment` 增加：
+```yaml
+	- ENABLE_GLOBAL_UPDATER=false
+```
+再次啟動後，日誌不會再出現 `[startup] global updater started`。
+
+#### 為什麼容器內 curl 不存在？
+
+基底映像是 PyTorch runtime，未預裝 curl。可改用：
+```powershell
+docker compose -f docker-compose.prod.yml exec web python - <<'PY'
+import urllib.request;print(urllib.request.urlopen('http://localhost:8000/health',timeout=3).read().decode())
+PY
+```
+如需安裝 curl（除錯用）：
+```powershell
+docker compose -f docker-compose.prod.yml exec web bash -c "apt-get update && apt-get install -y curl && curl -s http://localhost:8000/health"
+```
+```
+
+### 可調整的 Build 參數（--build-arg）
+
+- BASE_IMAGE：覆寫基底映像（預設 `pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime`）
+- SKIP_PIP_INSTALL：是否跳過依賴安裝（預設 false；除非你的 BASE_IMAGE 已預先安裝好所有 requirements，否則不要設為 true）
+- TORCH_FILTER：是否在安裝時略過 torch/torchvision/torchaudio（預設 true；讓 torch 維持使用基底映像的版本）
+
+範例：
+
+```powershell
+# 以 CPU 版 PyTorch 作為基底（適用於沒有 GPU 的機器）
+docker build --build-arg BASE_IMAGE=pytorch/pytorch:2.4.1-cpu -t new_project:cpu .
+
+# 強制由 pip 安裝（含 torch）— 通常不建議，僅在你確定需要覆蓋 PyTorch 版本時
+docker build --build-arg TORCH_FILTER=false -t new_project:full .
+```
+
+### 開發者常用指令速查（PowerShell）
+
+```powershell
+# 列出容器與映像
+docker ps -a; docker images
+
+# 進入容器（互動 shell）
+docker exec -it stock-ai bash
+
+# 清理暫存/中止的容器與懸掛映像
+docker container prune -f; docker image prune -f
+```
+
+> 提醒：Windows 請先啟動 Docker Desktop（鯨魚圖示為 Running）。
 
 ---
 
 ## 附註
 
 - 本服務僅使用「個股 CSV」（data/{symbol}_short_term_with_lag3.csv），不再依賴聚合檔。
-- 多數資料/統計端點皆需帶 symbol 參數（例如 /api/diagnostics?symbol=AAPL）。
-
-- 若不使用 Makefile，可直接照上述命令操作；Makefile 只是幫你把常用命令取個別名（見下）。
-- 本專案已移除批次腳本與多餘的工具腳本；如需批次或自動更新，建議改用 API（/api/build_symbol）自行外掛排程。
-
----
-
-## Makefile 是什麼？可以刪嗎？
-### ⚡ 加速 Docker 建置：預先烤好的依賴層（強烈推薦）
-
-若每次 `docker build` 都要重新安裝 `requirements.txt` 太慢，您可以先建一個「已安裝好所有套件」的基底映像，之後只要複製程式碼就能秒級完成建置。
-
-步驟（PowerShell）：
-
-```powershell
-# 1) 以 requirements.txt 的雜湊值當作標籤，建立依賴映像
-$reqHash = ((Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)).ToLower()
-docker build -f Dockerfile.deps --build-arg REQUIREMENTS_SHA=$reqHash -t new_project/py311-deps:$reqHash .
-
-# 2) 使用此依賴映像當作基底，並跳過再次安裝依賴
-docker build --build-arg BASE_IMAGE=new_project/py311-deps:$reqHash --build-arg SKIP_PIP_INSTALL=true -t new_project:latest .
-```
-
-說明：
-- `Dockerfile.deps` 會把 `requirements.txt` 裝進基底映像；只要需求沒變，這層可以長期重用。
-- 主 `Dockerfile` 新增 `BASE_IMAGE` 與 `SKIP_PIP_INSTALL` 參數；設為上述依賴映像 + 跳過安裝，即可極速建置。
-- 建議把依賴映像推到你的私有/公有 Registry，團隊成員即可直接重用（例如 `ghcr.io/yourorg/new_project/py311-deps:$reqHash`）。
-
-### 🏷️ 使用 GHCR（GitHub Container Registry）映像
-
-本專案的 CI（GitHub Actions）會自動將映像推到 GHCR：
-
-- 依賴映像（已安裝 requirements）：
-  - `ghcr.io/<你的帳號>/new_project/py311-deps:<12位requirements雜湊>`
-  - 用途：加速後續 App build（作為 BASE_IMAGE）
-- App 映像：
-  - 永遠會有：`ghcr.io/<你的帳號>/new_project/app:<git_sha>`
-  - 只有在「打 tag」時，才會另推：`ghcr.io/<你的帳號>/new_project/app:latest` 與 `app:<tag>`
-
-注意：第一次用 GHCR，請在 GitHub 帳號 Settings > Packages 啟用 GHCR；若要公開下載，記得把 Package 設為 Public。
-
-拉取與運行（PowerShell）：
-
-```powershell
-# 若是公開套件可直接拉，若為私有請先： docker login ghcr.io
-# 1) 下載標記為 latest（僅 tag 釋出時更新）
-docker pull ghcr.io/112304008-hub/new_project/app:latest
-
-# 2) 或下載特定版本（例如標籤 v1.2.3 或特定 git SHA）
-docker pull ghcr.io/112304008-hub/new_project/app:v1.2.3
-# 或
-docker pull ghcr.io/112304008-hub/new_project/app:<git_sha>
-
-# 3) 執行（聽 8000 埠）
-docker run --rm -p 8000:8000 ghcr.io/112304008-hub/new_project/app:latest
-
-# 健康檢查
-Invoke-WebRequest -Uri "http://localhost:8000/health"
-```
-
-在本機重建 App 但重用 GHCR 依賴層（加速 build）：
-
-```powershell
-$reqHash = ((Get-FileHash .\requirements.txt -Algorithm SHA256).Hash.Substring(0,12)).ToLower()
-docker build --build-arg BASE_IMAGE=ghcr.io/112304008-hub/new_project/py311-deps:$reqHash --build-arg SKIP_PIP_INSTALL=true -t new_project:dev .
-```
-
-> :latest 只有在打 tag 時才會更新；平時請使用 `app:<git_sha>` 或 `app:<tag>` 來鎖定版本。
-
-也可以使用腳本一鍵拉依賴並建置（PowerShell）：
-
-```powershell
-# 在專案根目錄執行
-scripts\build_from_ghcr.ps1 -AppTag dev
-# 產生的映像為 new_project:dev
-```
-
-Makefile 只是把常用命令封裝成短命令（例如 `make dev` 等同 `uvicorn main:app --reload`）。
-
-- 保留的好處：
-  - 跨平台快速啟動與測試（在有 `make` 的環境）。
-- 可以刪除嗎？
-  - 可以。如果你不會用 `make` 或在 Windows 上不裝 `make`，直接照上面命令操作即可。
+- 多數資料/統計端點皆需帶 symbol 參數（例如 `/api/diagnostics?symbol=AAPL`）。
+- 本專案已移除批次腳本與多餘的工具腳本；如需批次或自動更新，建議改用 API（`/api/build_symbol`、`/api/bulk_build_*`）。

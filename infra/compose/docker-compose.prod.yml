@@ -1,9 +1,10 @@
 services:
   web:
     image: new_project:latest
-    container_name: newproject_web_prod
     expose:
       - "8000"
+    ports:
+      - "${APP_PORT:-8001}:8000"  # 直接對外（單獨跑 web 時有用；與 Caddy 並行也可保留）
     environment:
       - PYTHONUNBUFFERED=1
       - API_KEY=${API_KEY:-}
@@ -17,14 +18,14 @@ services:
 
   caddy:
     image: caddy:2-alpine
-    container_name: newproject_caddy
     depends_on:
       - web
     ports:
       - "80:80"
       - "443:443"
     environment:
-      - DOMAIN=${DOMAIN}
+      # 提供預設空值以避免未設置時的 Compose 告警
+      - DOMAIN=${DOMAIN:-}
       - ACME_EMAIL=${ACME_EMAIL:-}
     volumes:
       - ../caddy/conf/Caddyfile:/etc/caddy/Caddyfile:ro
@@ -42,7 +43,6 @@ services:
 
   ddns:
     image: python:3.11-slim
-    container_name: newproject_ddns
     restart: unless-stopped
     profiles: ["ddns"]
     env_file:
@@ -62,5 +62,5 @@ networks:
     driver: bridge
 
 volumes:
-  data:
-  models:
+  - ../../data:/app/data:rw
+  - ../../models:/app/models:rw
