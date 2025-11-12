@@ -106,34 +106,7 @@ $port = if ($env:APP_PORT) { $env:APP_PORT } else { 8001 }
 for ($i=0; $i -lt 8; $i++) { try { Invoke-WebRequest -Uri "http://localhost:$port/health" -TimeoutSec 3; break } catch { Start-Sleep -Seconds 2 } }
 
 # 或者一鍵腳本（從任何目錄都可）：
-# powershell -File .\infra\compose\run_web.ps1
-
-# 先拉取基底映像（必要）
-docker pull pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime
-
-# 再建置 App 映像（請在專案「根目錄」執行 docker build；或用 infra/compose/run_web.ps1 自動完成）
-docker build -t new_project:latest .
-# 從任何目錄建置（絕對路徑，避免目錄錯誤）
-docker build -f C:\Users\runyu\OneDrive\桌面\new-project\Dockerfile -t new_project:latest C:\Users\runyu\OneDrive\桌面\new-project
-# 若你不確定目前所在路徑，可直接執行（從任何目錄）：
-# powershell -File .\infra\compose\run_web.ps1
-
-# 切換到 compose 目錄，只啟動 web 服務
-Set-Location infra/compose
-docker compose -f docker-compose.prod.yml up -d web  # 若失敗請確認上一行沒有重複執行造成路徑疊加
-
-# （可選）自訂主機埠（預設 8001），例如改為 8080：
-# $env:APP_PORT = 8080
-
-# 健康檢查（PowerShell 5.1 友善寫法；預設走 http://localhost:8001/health）
-$port = if ($env:APP_PORT) { $env:APP_PORT } else { 8001 }
-Invoke-WebRequest -Uri "http://localhost:$port/health"
-# 若剛啟動偶發 "連接意外關閉"，可使用簡易重試：
-for ($i=0; $i -lt 8; $i++) { try { Invoke-WebRequest -Uri "http://localhost:$port/health" -TimeoutSec 3; break } catch { Start-Sleep -Seconds 2 } }
-
-# 觀察日誌與停止
-docker compose -f docker-compose.prod.yml logs -f web
-docker compose -f docker-compose.prod.yml down
+powershell -File .\infra\compose\run_web.ps1
 
 ### 容器名稱衝突處理
 
@@ -173,22 +146,30 @@ docker ps -a --format "{{.Names}}" | Select-String newproject
 
 2) 含 Caddy 反向代理與 HTTPS（80/443）
 
+最簡用法（一鍵腳本，從任何目錄都可執行）：
+
+```powershell
+powershell -File .\infra\compose\run_all.ps1  # 會建置映像，啟動 web+caddy，並做健康檢查
+# 可選參數：-Domain your-domain.example -AcmeEmail you@example.com -ApiKey your-secret -AppPort 8001
+```
+
+手動（可選）：
+
+```powershell
 # 在專案根目錄建置映像檔
 docker build -t new_project:latest .
 
 # 設定必要環境變數（或改用 .env）
-$env:DOMAIN = "your-domain.example"  # 你的網域
-$env:ACME_EMAIL = "you@example.com"  # 憑證註冊 email（可選）
+$env:DOMAIN = "your-domain.example"
+$env:ACME_EMAIL = "you@example.com"
 # 若要保護 /api/*：
 # $env:API_KEY = "your-secret-key"
 
-# 切到 compose 目錄並啟動所有服務（web + caddy）
+# 啟動所有服務（web + caddy）
 Set-Location infra/compose
-# 可選：複製並編輯 .env（避免 DOMAIN 未設置的警告）
-# Copy-Item .env.example .env -ErrorAction SilentlyContinue
 docker compose -f docker-compose.prod.yml up -d
 
-# 用網域檢查健康情況（走 Caddy 80/443，不受 APP_PORT 影響）
+# 檢查健康（走 Caddy 80/443，不受 APP_PORT 影響）
 Invoke-WebRequest -Uri "http://$env:DOMAIN/health"
 
 # 觀察日誌與停止
@@ -196,9 +177,10 @@ docker compose -f docker-compose.prod.yml logs -f web
 docker compose -f docker-compose.prod.yml logs -f caddy
 docker compose -f docker-compose.prod.yml down
 ```
+```
 
 說明：
-- 正式 compose 會使用 named volumes 保存 `/app/data` 與 `/app/models`，重啟不會遺失資料。
+- 正式 compose 會將本機 `data/` 與 `models/` 掛載為容器內的 `/app/data` 與 `/app/models`（bind mount），重啟不會遺失資料。
 - 更新程式：重新 `docker build -t new_project:latest .` 後，再 `docker compose -f docker-compose.prod.yml up -d` 即可滾更。
 - 若要使用外部排程取代內建全域更新，可關閉 `ENABLE_GLOBAL_UPDATER` 並定期呼叫 `/api/bulk_build_start`。
 

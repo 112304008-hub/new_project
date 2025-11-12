@@ -10,8 +10,8 @@ services:
       - API_KEY=${API_KEY:-}
       - RATE_LIMIT_PER_MIN=200
     volumes:
-      - data:/app/data
-      - models:/app/models
+      - ../../data:/app/data:rw
+      - ../../models:/app/models:rw
     restart: unless-stopped
     networks:
       - webnet
@@ -61,6 +61,6 @@ networks:
   webnet:
     driver: bridge
 
-volumes:
-  - ../../data:/app/data:rw
-  - ../../models:/app/models:rw
+# volumes:
+#   - ../../data:/app/data:rw
+#   - ../../models:/app/models:rw

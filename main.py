@@ -263,48 +263,48 @@ def _infer_symbol_from_path(p: Path) -> str | None:
 
 
 def _ensure_symbol_csv(symbol: str) -> Path:
-    """確保 symbol 對應的特徵 CSV 存在；沒有就用 yfinance 建出來後回傳路徑。"""
-    p_read = _symbol_csv_path(symbol)
-    if p_read.exists() and p_read.stat().st_size > 0:
-        return p_read
+    """確保 symbol 對應的特徵 CSV 存在；缺少時以 yfinance 建置後回傳路徑。"""
+    from datetime import datetime
+
+    p = _symbol_csv_path(symbol)
+    if p.exists() and p.stat().st_size > 0:
+        return p
+
+    _ensure_yf()
+    out = _symbol_csv_write_path(symbol)
+    out.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        _ensure_yf()
-        p_write = _symbol_csv_write_path(symbol)
-        p_write.parent.mkdir(parents=True, exist_ok=True)
-        _build_from_yfinance(symbol=symbol, out_csv=p_write)
-        if p_write.exists() and p_write.stat().st_size > 0:
-            from datetime import datetime
-            try:
-                (p_write.parent / f"{symbol}_last_update.txt").write_text(
-                    datetime.now().isoformat(), encoding="utf-8"
-                )
-            except Exception:
-                pass
-            return p_write
+        _build_from_yfinance(symbol=symbol, out_csv=out)
     except Exception as e:
         raise RuntimeError(f"無法為 {symbol} 建構 CSV：{e}") from e
 
-    # Fallback message if file still missing
-    raise FileNotFoundError(f"Symbol CSV 仍然不存在：{_symbol_csv_write_path(symbol)}")
+    if not out.exists() or out.stat().st_size == 0:
+        raise FileNotFoundError(f"Symbol CSV 仍然不存在：{out}")
+
+    # 非關鍵的時間戳紀錄，失敗可忽略
+    try:
+        (out.parent / f"{symbol}_last_update.txt").write_text(datetime.now().isoformat(), encoding="utf-8")
+    except Exception:
+        pass
+
+    return out
 
 """
 移除舊版預測 fallback：統一走 predict 主路徑，失敗則回標準錯誤。
 """
-
 # 全域（所有現有 CSV）自動更新任務：每 5 分鐘掃描 data/ 並更新，避免單股細粒度控制的複雜度
 # 允許以環境變數 ENABLE_GLOBAL_UPDATER 控制（'false' / '0' / 'no' / 'off' 為停用）
 def _parse_bool_env(name: str, default: bool) -> bool:
-    val = os.getenv(name)
-    if val is None:
+    v = os.getenv(name)
+    if v is None:
         return default
-    v = val.strip().lower()
-    if v in ("0", "false", "no", "off"):  # 明確停用集合
-        return False
-    if v in ("1", "true", "yes", "on"):
+    s = v.strip().lower()
+    if s in {"1", "true", "yes", "on"}:
         return True
-    # 非法值回退預設並記錄
-    logging.getLogger("app").warning(f"[config] Unknown boolean for {name}={val!r}, fallback to {default}")
+    if s in {"0", "false", "no", "off"}:
+        return False
+    logging.getLogger("app").warning(f"[config] Unknown boolean for {name}={v!r}, fallback to {default}")
     return default
 
 ENABLE_GLOBAL_UPDATER = _parse_bool_env("ENABLE_GLOBAL_UPDATER", True)
@@ -314,77 +314,42 @@ GLOBAL_UPDATE_CONCURRENCY = 4
 
 
 async def _all_symbols_loop(interval_min: int = 5, concurrency: int = 4, backoff_factor: float = 2.0, max_backoff_min: int = 30):
-    """全域自動更新迴圈：每隔 interval 分鐘掃描 data/ 內所有 *_short_term_with_lag3.csv 並逐一更新。
-
-    設計目標：
-      - 永久 5 分鐘更新機制（預設），不需要單點控制。
-      - 受限併發，避免過度壓力。
-      - 失敗時使用指數退避（以輪次為單位）；成功後重置。
-    """
-    print(f"[global auto] 啟動全域自動更新：every {interval_min} min (concurrency={concurrency}, backoff_factor={backoff_factor}, max_backoff={max_backoff_min}m)")
-    consecutive_failures = 0
-    base = max(1, int(interval_min))
+    """定期掃描 data/ 並受控併發更新；失敗採指數退避。"""
+    log = logging.getLogger("app")
+    log.info("[global auto] start every %s min (concurrency=%s, backoff=%s, max=%sm)", interval_min, concurrency, backoff_factor, max_backoff_min)
+    consecutive_failures, base = 0, max(1, int(interval_min))
     while True:
         cycle_failed = False
         try:
-            # 掃描現有 CSV 以推斷 symbols
-            syms: list[str] = []
-            try:
-                for p in DATA_DIR.glob('*_short_term_with_lag3.csv'):
-                    sym = p.stem.replace('_short_term_with_lag3', '')
-                    if sym:
-                        syms.append(sym.upper())
-                # 去重保序
-                syms = list(dict.fromkeys(syms))
-            except Exception as e:
-                print(f"[global auto] 掃描 data/ 失敗：{e}")
-                cycle_failed = True
-                syms = []
-
-            if not syms:
-                print("[global auto] 尚無可更新之 CSV，稍後再試")
-            sem = asyncio.Semaphore(max(1, int(concurrency)))
-
-            async def _build_one(sym: str):
-                async with sem:
-                    p = _symbol_csv_write_path(sym)
-                    try:
-                        await asyncio.to_thread(lambda: (_ensure_yf(), _build_from_yfinance(symbol=sym, out_csv=p)))
-                        ts_path = p.parent / f"{sym}_last_update.txt"
-                        from datetime import datetime
-                        try:
-                            with ts_path.open('w', encoding='utf-8') as f:
-                                f.write(datetime.now().isoformat())
-                        except Exception:
-                            pass
-                    except Exception as e:
-                        print(f"[global auto] 更新 {sym} 失敗: {e}")
-                        failures.append(True)
-
-            failures: list[bool] = []
-            tasks = [asyncio.create_task(_build_one(s)) for s in syms]
-            if tasks:
-                await asyncio.gather(*tasks)
-            if failures:
-                cycle_failed = True
-        except asyncio.CancelledError:
-            print("[global auto] 全域 loop 已取消")
-            raise
+            syms = list(dict.fromkeys(p.stem.replace('_short_term_with_lag3','').upper() for p in DATA_DIR.glob('*_short_term_with_lag3.csv')))
         except Exception as e:
-            print(f"[global auto] 迴圈錯誤：{e}")
-            cycle_failed = True
-
-        # 退避邏輯
+            log.warning("[global auto] 掃描失敗：%s", e); syms = []; cycle_failed = True
+        if not syms:
+            log.info("[global auto] 尚無可更新之 CSV，稍後再試")
+        sem = asyncio.Semaphore(max(1, int(concurrency)))
+        async def _build_one(sym: str):
+            async with sem:
+                p = _symbol_csv_write_path(sym)
+                try:
+                    await asyncio.to_thread(lambda: (_ensure_yf(), _build_from_yfinance(symbol=sym, out_csv=p)))
+                    from datetime import datetime
+                    try: (p.parent / f"{sym}_last_update.txt").write_text(datetime.now().isoformat(), encoding="utf-8")
+                    except Exception: pass
+                    return None
+                except Exception as e:
+                    log.warning("[global auto] 更新 %s 失敗: %s", sym, e); return e
+        if syms:
+            res = await asyncio.gather(*[asyncio.create_task(_build_one(s)) for s in syms])
+            cycle_failed = any(res)
         if cycle_failed:
             consecutive_failures += 1
             sleep_for = min(int(max_backoff_min), int(base * (backoff_factor ** consecutive_failures)))
-            print(f"[global auto] 本輪有失敗，使用 backoff 休息 {sleep_for} 分鐘 (連續失敗 {consecutive_failures})")
+            log.info("[global auto] 失敗 backoff %s 分鐘 (連續 %s)", sleep_for, consecutive_failures)
         else:
-            if consecutive_failures:
-                print("[global auto] 復原成功，重置 backoff")
-            consecutive_failures = 0
-            sleep_for = base
-        await asyncio.sleep(sleep_for * 60)
+            if consecutive_failures: log.info("[global auto] 復原成功，重置 backoff")
+            consecutive_failures, sleep_for = 0, base
+        try: await asyncio.sleep(sleep_for * 60)
+        except asyncio.CancelledError: log.info("[global auto] loop cancelled"); raise
 
 
 @app.get('/api/build_symbol')
@@ -401,19 +366,20 @@ def build_symbol(symbol: str):
 
 @app.get('/api/build_symbols')
 def build_symbols(symbols: str):
-    """一次建置多個 symbol 的 CSV。參數 `symbols` 以逗號分隔，例如 '2330,2317,AAPL'。"""
+    """一次建置多個 symbol 的 CSV（以逗號分隔，例如 '2330,2317,AAPL'）。"""
     if not symbols:
         return JSONResponse({"ok": False, "error": "請提供 symbols 參數"}, status_code=400)
     syms = [s.strip() for s in symbols.split(',') if s.strip()]
-    results = {}
-    for s in syms:
+
+    def _build_one(s: str):
         try:
             p = _ensure_symbol_csv(s)
-            results[s] = {"ok": True, "csv": str(p.resolve())}
+            return {"ok": True, "csv": str(p.resolve())}
         except Exception as e:
-            results[s] = {"ok": False, "error": str(e)}
-    return {"ok": True, "results": results}
+            return {"ok": False, "error": str(e)}
 
+    results = {s: _build_one(s) for s in syms}
+    return {"ok": True, "results": results}
 
 @app.get('/api/list_symbols')
 def list_symbols():
