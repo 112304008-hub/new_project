@@ -1,5 +1,9 @@
 services:
   web:
+    # 直接在 compose 中定義 build，避免手動 docker build
+    build:
+      context: ../../
+      dockerfile: Dockerfile
     image: new_project:latest
     expose:
       - "8000"
