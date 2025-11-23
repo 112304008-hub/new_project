@@ -1,0 +1,13 @@
+services:
+  web:
+    build: ../../
+    ports:
+      - "${APP_PORT:-8001}:8000"
+    volumes:
+      - app-data:/app/data
+      - app-models:/app/models
+    environment:
+      - PYTHONUNBUFFERED=1
+      # 可選：設定 API_KEY 以保護 /api/* 端點
+      # - API_KEY=${API_KEY}
+    restart: unless-stopped

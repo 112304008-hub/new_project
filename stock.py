@@ -178,12 +178,12 @@ def predict(csv_path: Optional[Union[str, Path]] = None,
         symbol_csv = DATA_DIR / f"{s}_short_term_with_lag3.csv"
         if csv_path is None:
             csv_path = symbol_csv
-        # if symbol csv doesn't exist, try to fetch & build using yfinance and include expected features
+        # if symbol csv doesn't exist, try to fetch & build using twelvedata and include expected features
         if not Path(csv_path).exists():
             try:
-                _ensure_yf()
-                # _build_from_yfinance 不接受 expected_features 參數；僅建立基本欄位與特徵
-                _build_from_yfinance(symbol=s, out_csv=Path(csv_path))
+                _ensure_td()
+                # _build_from_td 不接受 expected_features 參數；僅建立基本欄位與特徵
+                _build_from_td(symbol=s, out_csv=Path(csv_path))
             except Exception:
                 # fallback: 交由 _resolve_csv_path 後續處理缺檔錯誤
                 pass
@@ -341,21 +341,23 @@ def _infer_symbol_from_path(path: Union[str, Path]) -> Optional[str]:
     return None
 
 
-def _ensure_yf():
-    # lazy import yfinance
-    global yf
+def _ensure_td():
+    # lazy import twelvedata
+    global td
     try:
-        import yfinance as yf
-        globals()['yf'] = yf
+        from twelvedata import TDClient
+        # Initialize with API key
+        globals()['td'] = TDClient(apikey="38faf585444e44c7b076b781e8912d25")
     except Exception:
         # attempt dynamic import as earlier
         import importlib
-        globals()['yf'] = importlib.import_module('yfinance')
+        td_module = importlib.import_module('twelvedata')
+        globals()['td'] = td_module.TDClient(apikey="38faf585444e44c7b076b781e8912d25")
 
 
-def _fetch_ohlcv_yf(symbol: str, start: str = "2020-01-01", end: Optional[str] = None) -> pd.DataFrame:
-    """Fetch OHLCV using yfinance; handle Taiwan tickers (numeric -> append .TW)"""
-    _ensure_yf()
+def _fetch_ohlcv_td(symbol: str, start: str = "2020-01-01", end: Optional[str] = None) -> pd.DataFrame:
+    """Fetch OHLCV using twelvedata; handle Taiwan tickers (numeric -> append .TW)"""
+    _ensure_td()
     s = symbol.strip()
     # if symbol is digits only, treat as TW ticker
     if s.isdigit():
@@ -363,27 +365,37 @@ def _fetch_ohlcv_yf(symbol: str, start: str = "2020-01-01", end: Optional[str] =
     else:
         # allow user to pass full ticker like AAPL, 2330.TW, TSM
         ticker = s
-        # if all uppercase letters and length 3 (TSM), try adding .TWO? leave as-is
-    t = globals().get('yf')
-    hist = t.Ticker(ticker).history(start=start, end=end, interval="1d", auto_adjust=False)
+    
+    client = globals().get('td')
+    # Fetch time series data
+    ts = client.time_series(
+        symbol=ticker,
+        interval="1day",
+        outputsize=5000,
+        start_date=start,
+        end_date=end
+    )
+    hist = ts.as_pandas()
+    
     if hist is None or hist.empty:
-        raise RuntimeError(f"yfinance 無法取得 {ticker}")
+        raise RuntimeError(f"twelvedata 無法取得 {ticker}")
+    
     hist = hist.reset_index()
-    hist['date'] = pd.to_datetime(hist['Date']).dt.strftime('%Y-%m-%d')
+    hist['date'] = pd.to_datetime(hist['datetime']).dt.strftime('%Y-%m-%d')
     hist = hist.rename(columns={
-        'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'
+        'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close', 'volume': 'volume'
     })
-    return hist[['date','open','high','low','close','volume']]
+    return hist[['date','open','high','low','close','volume']].sort_values('date').reset_index(drop=True)
 
 
-def _build_from_yfinance(symbol: str, out_csv: Path, start: str = "2020-01-01") -> pd.DataFrame:
-    """Build features for given symbol using yfinance and save CSV in same schema as test.build_2330"""
-    df_ohlcv = _fetch_ohlcv_yf(symbol, start=start)
+def _build_from_td(symbol: str, out_csv: Path, start: str = "2020-01-01") -> pd.DataFrame:
+    """Build features for given symbol using twelvedata and save CSV in same schema as test.build_2330"""
+    df_ohlcv = _fetch_ohlcv_td(symbol, start=start)
     df = df_ohlcv.rename(columns={
         'date': '年月日','open':'開盤價(元)','high':'最高價(元)','low':'最低價(元)',
         'close':'收盤價(元)','volume':'成交量(千股)'
     }).copy()
-    # yfinance volume is raw shares; convert to thousands
+    # twelvedata volume is raw shares; convert to thousands
     df['成交量(千股)'] = pd.to_numeric(df['成交量(千股)'], errors='coerce')/1000.0
     df['年月日'] = pd.to_datetime(df['年月日'])
 
@@ -420,9 +432,11 @@ def _build_from_yfinance(symbol: str, out_csv: Path, start: str = "2020-01-01") 
 
     # attempt to enrich with USD/TWD and TSM ADR (reuse logic from test.py)
     try:
-        # USD/TWD via yfinance ticker TWD=X
-        fx = globals().get('yf').download('TWD=X', start=start, end=None, interval='1d', progress=False)
-        fx = fx.reset_index(); fx['date'] = pd.to_datetime(fx['Date']).dt.strftime('%Y-%m-%d'); fx['USDTWD'] = pd.to_numeric(fx['Close'], errors='coerce'); fx = fx[['date','USDTWD']]
+        # USD/TWD via twelvedata
+        client = globals().get('td')
+        fx_ts = client.time_series(symbol='USD/TWD', interval='1day', outputsize=5000, start_date=start)
+        fx = fx_ts.as_pandas()
+        fx = fx.reset_index(); fx['date'] = pd.to_datetime(fx['datetime']).dt.strftime('%Y-%m-%d'); fx['USDTWD'] = pd.to_numeric(fx['close'], errors='coerce'); fx = fx[['date','USDTWD']]
         df = df.merge(fx, left_on='年月日', right_on='date', how='left').drop(columns=['date'])
         df[['USDTWD']] = df[['USDTWD']].ffill()
     except Exception:
@@ -430,10 +444,12 @@ def _build_from_yfinance(symbol: str, out_csv: Path, start: str = "2020-01-01") 
         pass
 
     try:
-        # TSM ADR via yfinance (TSM ticker)
-        adr = globals().get('yf').Ticker('TSM').history(start=start, interval='1d', auto_adjust=False)
+        # TSM ADR via twelvedata (TSM ticker)
+        client = globals().get('td')
+        adr_ts = client.time_series(symbol='TSM', interval='1day', outputsize=5000, start_date=start)
+        adr = adr_ts.as_pandas()
         if adr is not None and not adr.empty:
-            adr = adr.reset_index(); adr['date'] = pd.to_datetime(adr['Date']).dt.strftime('%Y-%m-%d'); adr['TSM_ADR_close'] = pd.to_numeric(adr['Close'], errors='coerce'); adr = adr[['date','TSM_ADR_close']]
+            adr = adr.reset_index(); adr['date'] = pd.to_datetime(adr['datetime']).dt.strftime('%Y-%m-%d'); adr['TSM_ADR_close'] = pd.to_numeric(adr['close'], errors='coerce'); adr = adr[['date','TSM_ADR_close']]
             df = df.merge(adr, left_on='年月日', right_on='date', how='left').drop(columns=['date'])
             df[['TSM_ADR_close']] = df[['TSM_ADR_close']].ffill()
             df['TSM_ADR_ret1d'] = df['TSM_ADR_close'].pct_change()

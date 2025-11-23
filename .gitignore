@@ -60,6 +60,10 @@ venv/
 ENV/
 env.bak/
 
+# .env in compose directory (Docker Compose v2+)
+compose/.env
+infra/compose/.env
+
 # VSCode
 .vscode/
 

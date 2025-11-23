@@ -2,7 +2,7 @@
 
 本服務核心目標：
 1. 提供『股價籤筒 / 預測 API』：/api/draw 讀取最新特徵 CSV 與已訓練模型，回傳「明日漲跌」推論結果與籤筒格式文字。
-2. 支援動態建立/更新個股特徵資料：/api/build_symbol, /api/build_symbols 等，必要時自動用 yfinance 下載歷史價量並產生特徵 CSV。
+2. 支援動態建立/更新個股特徵資料：/api/build_symbol, /api/build_symbols 等，必要時自動用 twelvedata 下載歷史價量並產生特徵 CSV。
 3. 內建全域自動更新：服務啟動後每 5 分鐘掃描 data/ 內現有 CSV 以受控併發進行更新；另提供批次建置（/api/bulk_*）。
 4. 暴露統計診斷與特徵檢定：/api/diagnostics, /api/stattests, /api/lag_stats, /api/series, /api/latest_features。
 5. 提供健康檢查 (/health) 與版本資訊 (/version) 供部署監控與稽核。
@@ -56,7 +56,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from stock import predict, MODELS_DIR
-from stock import _ensure_yf, _build_from_yfinance
+from stock import _ensure_td, _build_from_td
 import asyncio
 import json
 from typing import Dict
@@ -74,6 +74,7 @@ APP_GIT_SHA = os.getenv("APP_GIT_SHA", "UNKNOWN")
 APP_BUILD_TIME = os.getenv("APP_BUILD_TIME", "UNKNOWN")
 API_KEY = os.getenv("API_KEY")  # optional
 CSV_ENCODING = "utf-8-sig"
+ENABLE_AUTO_BUILD_PREDICT = os.getenv("ENABLE_AUTO_BUILD_PREDICT", "true").strip().lower() in {"1","true","yes","on"}
 
 """Logging 初始化：
 預設使用環境變數 LOG_LEVEL（未設定時為 INFO）。
@@ -141,24 +142,36 @@ except Exception:
 # 提供 /static/* 靜態檔案服務（前端背景圖、圖示等）
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# === 首頁：籤筒網頁 ===
-@app.get("/")
-def home():
-    """首頁：直接回傳 `template2.html`。"""
-    return FileResponse(HTML)
+# === 註冊路由 ===
+from api.home import router as home_router
+from api.predict import router as predict_router
+from api.data_build import router as data_build_router
+
+app.include_router(home_router)
+app.include_router(predict_router)
+app.include_router(data_build_router)
 
 # CSV 解析與預測共用小工具：先解析 CSV 再帶入預測，避免重複設定參數
 def _resolve_csv_for(symbol: str, auto_build_csv: bool) -> Path:
-    """依設定取得對應 CSV 路徑（強制從 data/ 讀取，不再自動建置）。
+    """取得 symbol 對應的 CSV。
 
-    說明：
-    - 無論 auto_build_csv 真偽，皆直接從 data/<symbol>_short_term_with_lag3.csv 讀取。
-    - 若檔案不存在或為空，回傳 404（不再觸發 yfinance 自動建置）。
+    行為：
+    - 若檔案存在且非空：直接回傳。
+    - 若不存在或為空：
+        * auto_build_csv=True 時嘗試自動建置（呼叫 _ensure_symbol_csv）。
+        * auto_build_csv=False 時回 404 要求先建置。
     """
     p = _symbol_csv_path(symbol)
-    if not p.exists() or p.stat().st_size == 0:
-        raise HTTPException(status_code=404, detail=f"找不到現有資料：{p.name}（請確認 data/ 內檔案存在且非空）")
-    return p
+    if p.exists() and p.stat().st_size > 0:
+        return p
+    if auto_build_csv:
+        try:
+            built = _ensure_symbol_csv(symbol)
+            logging.getLogger("app").info("[auto-build] symbol=%s csv=%s", symbol, built)
+            return built
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"自動建置失敗：{e}")
+    raise HTTPException(status_code=404, detail=f"找不到 CSV：{p.name}（請先呼叫 /api/build_symbol 或 /api/bulk_build_start 建置）")
 
 def _run_predict(csv_path: Path, model: ModelName, symbol: str) -> dict:
     """以指定 CSV 與模型執行預測，回傳統一資料結構。"""
@@ -185,59 +198,6 @@ def _load_threshold(model: ModelName | str) -> float | None:
     except Exception:
         return None
 
-# === API: 抽籤（預測）=== 
-@app.get("/api/draw")
-def draw(model: ModelName = ModelName.rf, symbol: str | None = None):
-    """執行單次預測（便利版）。
-    - 需要提供 symbol；若 CSV 不存在則自動建置
-    - 回傳：{model, label, proba, symbol, threshold, confidence}
-    """
-    # 必須指定 symbol（僅使用個股 CSV）
-    if not symbol:
-        raise HTTPException(status_code=400, detail="請提供 symbol 參數，例如 ?symbol=AAPL")
-
-    # 先解析 CSV，再帶入預測（固定從 data/ 讀取，不自動建置）
-    csvp = _resolve_csv_for(symbol, auto_build_csv=False)
-    res = _run_predict(csvp, model, symbol)
-
-    # 讀取對應模型的 threshold 並計算信心度（以與門檻距離作為簡單 proxy）
-    thr = _load_threshold(model)
-    conf = None
-    try:
-        proba = res.get("proba")
-        if thr is not None and proba is not None:
-            conf = abs(float(proba) - float(thr))
-    except Exception:
-        conf = None
-
-    # 選擇性記錄：僅在有設定 logging handler/level 時才會輸出
-    logging.info(
-        "[draw] model=%s symbol=%s proba=%s threshold=%s confidence=%s",
-        res.get("model"), symbol, res.get("proba"), thr, conf,
-    )
-
-    res.update({"threshold": thr, "confidence": conf})
-    return res
-
-# === API: 精簡預測（最小回傳結構）===
-@app.get("/api/predict")
-def predict_min(model: ModelName = ModelName.rf, symbol: str | None = None):
-    """簡化版單次預測。
-
-    設計目標：
-    - 僅回傳最小必需欄位：label、proba（以及 model 供除錯）。
-    - 不自動建置缺少的 CSV；若無資料則回 404，請先呼叫 /api/build_symbol。
-    - 以標準 HTTP 例外回應錯誤碼，不含額外文案。
-    """
-    if not symbol:
-        raise HTTPException(status_code=400, detail="請提供 symbol 參數，例如 ?symbol=AAPL")
-
-    # 僅使用既有 CSV，不嘗試自動建置（更簡潔）
-    csvp = _resolve_csv_for(symbol, auto_build_csv=False)
-    res = _run_predict(csvp, model, symbol)
-    # 與 /api/draw 輕微不同：最小欄位需求（label, proba, model）
-    return {"label": res["label"], "proba": res["proba"], "model": res["model"]}
-
 # === Symbol 輔助與個股自動更新 ===
 
 def _symbol_csv_path(symbol: str) -> Path:
@@ -263,19 +223,21 @@ def _infer_symbol_from_path(p: Path) -> str | None:
 
 
 def _ensure_symbol_csv(symbol: str) -> Path:
-    """確保 symbol 對應的特徵 CSV 存在；缺少時以 yfinance 建置後回傳路徑。"""
+    """確保 symbol 對應的特徵 CSV 存在；缺少時以 twelvedata 建置後回傳路徑。"""
     from datetime import datetime
 
     p = _symbol_csv_path(symbol)
     if p.exists() and p.stat().st_size > 0:
         return p
 
-    _ensure_yf()
+    _ensure_td()
     out = _symbol_csv_write_path(symbol)
     out.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        _build_from_yfinance(symbol=symbol, out_csv=out)
+        _build_from_td(symbol=symbol, out_csv=out)
+    except Exception as e:
+        raise RuntimeError(f"無法為 {symbol} 建構 CSV：{e}") from e
     except Exception as e:
         raise RuntimeError(f"無法為 {symbol} 建構 CSV：{e}") from e
 
@@ -293,115 +255,6 @@ def _ensure_symbol_csv(symbol: str) -> Path:
 """
 移除舊版預測 fallback：統一走 predict 主路徑，失敗則回標準錯誤。
 """
-# 全域（所有現有 CSV）自動更新任務：每 5 分鐘掃描 data/ 並更新，避免單股細粒度控制的複雜度
-# 允許以環境變數 ENABLE_GLOBAL_UPDATER 控制（'false' / '0' / 'no' / 'off' 為停用）
-def _parse_bool_env(name: str, default: bool) -> bool:
-    v = os.getenv(name)
-    if v is None:
-        return default
-    s = v.strip().lower()
-    if s in {"1", "true", "yes", "on"}:
-        return True
-    if s in {"0", "false", "no", "off"}:
-        return False
-    logging.getLogger("app").warning(f"[config] Unknown boolean for {name}={v!r}, fallback to {default}")
-    return default
-
-ENABLE_GLOBAL_UPDATER = _parse_bool_env("ENABLE_GLOBAL_UPDATER", True)
-GLOBAL_UPDATE_TASK: asyncio.Task | None = None
-GLOBAL_UPDATE_INTERVAL_MIN = 5
-GLOBAL_UPDATE_CONCURRENCY = 4
-
-
-async def _all_symbols_loop(interval_min: int = 5, concurrency: int = 4, backoff_factor: float = 2.0, max_backoff_min: int = 30):
-    """定期掃描 data/ 並受控併發更新；失敗採指數退避。"""
-    log = logging.getLogger("app")
-    log.info("[global auto] start every %s min (concurrency=%s, backoff=%s, max=%sm)", interval_min, concurrency, backoff_factor, max_backoff_min)
-    consecutive_failures, base = 0, max(1, int(interval_min))
-    while True:
-        cycle_failed = False
-        try:
-            syms = list(dict.fromkeys(p.stem.replace('_short_term_with_lag3','').upper() for p in DATA_DIR.glob('*_short_term_with_lag3.csv')))
-        except Exception as e:
-            log.warning("[global auto] 掃描失敗：%s", e); syms = []; cycle_failed = True
-        if not syms:
-            log.info("[global auto] 尚無可更新之 CSV，稍後再試")
-        sem = asyncio.Semaphore(max(1, int(concurrency)))
-        async def _build_one(sym: str):
-            async with sem:
-                p = _symbol_csv_write_path(sym)
-                try:
-                    await asyncio.to_thread(lambda: (_ensure_yf(), _build_from_yfinance(symbol=sym, out_csv=p)))
-                    from datetime import datetime
-                    try: (p.parent / f"{sym}_last_update.txt").write_text(datetime.now().isoformat(), encoding="utf-8")
-                    except Exception: pass
-                    return None
-                except Exception as e:
-                    log.warning("[global auto] 更新 %s 失敗: %s", sym, e); return e
-        if syms:
-            res = await asyncio.gather(*[asyncio.create_task(_build_one(s)) for s in syms])
-            cycle_failed = any(res)
-        if cycle_failed:
-            consecutive_failures += 1
-            sleep_for = min(int(max_backoff_min), int(base * (backoff_factor ** consecutive_failures)))
-            log.info("[global auto] 失敗 backoff %s 分鐘 (連續 %s)", sleep_for, consecutive_failures)
-        else:
-            if consecutive_failures: log.info("[global auto] 復原成功，重置 backoff")
-            consecutive_failures, sleep_for = 0, base
-        try: await asyncio.sleep(sleep_for * 60)
-        except asyncio.CancelledError: log.info("[global auto] loop cancelled"); raise
-
-
-@app.get('/api/build_symbol')
-def build_symbol(symbol: str):
-    """按需建置單一 symbol 的 CSV，成功則回傳路徑，否則回傳錯誤。"""
-    if not symbol:
-        return JSONResponse({"ok": False, "error": "請提供 symbol 參數"}, status_code=400)
-    try:
-        p = _ensure_symbol_csv(symbol)
-        return {"ok": True, "symbol": symbol, "csv": str(p.resolve())}
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-@app.get('/api/build_symbols')
-def build_symbols(symbols: str):
-    """一次建置多個 symbol 的 CSV（以逗號分隔，例如 '2330,2317,AAPL'）。"""
-    if not symbols:
-        return JSONResponse({"ok": False, "error": "請提供 symbols 參數"}, status_code=400)
-    syms = [s.strip() for s in symbols.split(',') if s.strip()]
-
-    def _build_one(s: str):
-        try:
-            p = _ensure_symbol_csv(s)
-            return {"ok": True, "csv": str(p.resolve())}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-
-    results = {s: _build_one(s) for s in syms}
-    return {"ok": True, "results": results}
-
-@app.get('/api/list_symbols')
-def list_symbols():
-    """列出存在於 data/（或可寫目錄）中的 symbol CSV（樣式：<symbol>_short_term_with_lag3.csv）。"""
-    out = []
-    seen = set()
-    try:
-        # Prefer files from write dir, then from read-only data dir
-        for dir_ in (DATA_WRITE_DIR, DATA_DIR):
-            if not dir_.exists():
-                continue
-            for p in dir_.glob('*_short_term_with_lag3.csv'):
-                sym = p.stem.replace('_short_term_with_lag3', '').upper()
-                if sym in seen:
-                    continue
-                seen.add(sym)
-                out.append({"symbol": sym, "csv": str(p.resolve()), "size": p.stat().st_size})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-    return {"ok": True, "count": len(out), "symbols": out}
-
-
 # === 批次抓取輔助與背景任務 ===
 BULK_TASKS: Dict[str, Dict] = {}
 
@@ -451,13 +304,19 @@ async def _bulk_build_worker(symbols, concurrency, task_id):
     BULK_TASKS[task_id]['total'] = total
     BULK_TASKS[task_id]['done'] = 0
     BULK_TASKS[task_id]['errors'] = {}
+    BULK_TASKS[task_id]['files'] = {}
 
     async def _build_one(s):
         async with sem:
             try:
                 # run blocking build in thread
                 p = _symbol_csv_write_path(s)
-                await asyncio.to_thread(lambda: (_ensure_yf(), _build_from_yfinance(symbol=s, out_csv=p)))
+                await asyncio.to_thread(lambda: (_ensure_td(), _build_from_td(symbol=s, out_csv=p)))
+                try:
+                    # 記錄成功產出的 CSV 絕對路徑，方便前端或除錯查閱
+                    BULK_TASKS[task_id]['files'][s] = str(p.resolve())
+                except Exception:
+                    BULK_TASKS[task_id]['files'][s] = str(p)
                 BULK_TASKS[task_id]['done'] += 1
             except Exception as e:
                 BULK_TASKS[task_id]['errors'][s] = str(e)
@@ -509,6 +368,28 @@ def bulk_build_status(task_id: str):
     out['progress'] = float(done) / total if total else 1.0
     return {"ok": True, "task": out}
 
+@app.get('/api/where_is_data')
+def where_is_data():
+    """回報目前資料目錄與已存在 CSV 絕對路徑（除錯用途）。"""
+    try:
+        data_dir = str(DATA_DIR.resolve())
+        write_dir = str(DATA_WRITE_DIR.resolve())
+    except Exception:
+        data_dir = str(DATA_DIR)
+        write_dir = str(DATA_WRITE_DIR)
+    files = []
+    try:
+        for p in DATA_WRITE_DIR.glob('*_short_term_with_lag3.csv'):
+            files.append(str(p.resolve()))
+        if DATA_WRITE_DIR.resolve() != DATA_DIR.resolve():
+            for p in DATA_DIR.glob('*_short_term_with_lag3.csv'):
+                rp = str(p.resolve())
+                if rp not in files:
+                    files.append(rp)
+    except Exception:
+        pass
+    return {"data_dir": data_dir, "write_dir": write_dir, "count": len(files), "files": files, "auto_build_predict": ENABLE_AUTO_BUILD_PREDICT}
+
 
 @app.get('/api/bulk_build_stop')
 def bulk_build_stop(task_id: str):
@@ -522,9 +403,6 @@ def bulk_build_stop(task_id: str):
         info['status'] = 'cancelled'
         return {"ok": True, "status": "cancelled", "task_id": task_id}
     return {"ok": False, "error": "task not running or already finished"}
-
-
-# （已移除 /api/auto/* 相關端點）
 
 
 @app.get("/api/diagnostics")
@@ -933,6 +811,25 @@ def version():
 
 # （精簡版）移除 Prometheus 指標端點
 
+# === 全域自動更新配置 ===
+def _parse_bool_env(name: str, default: bool) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return default
+    s = v.strip().lower()
+    if s in {"1", "true", "yes", "on"}:
+        return True
+    if s in {"0", "false", "no", "off"}:
+        return False
+    logging.getLogger("app").warning(f"[config] Unknown boolean for {name}={v!r}, fallback to {default}")
+    return default
+
+ENABLE_GLOBAL_UPDATER = _parse_bool_env("ENABLE_GLOBAL_UPDATER", True)
+GLOBAL_UPDATE_TASK: asyncio.Task | None = None
+GLOBAL_UPDATE_INTERVAL_MIN = 5
+GLOBAL_UPDATE_CONCURRENCY = 4
+
+
 # === 快速導覽（路由與背景任務） ===
 @app.get('/api/overview')
 def api_overview(only_api: bool = True):
@@ -983,6 +880,7 @@ async def _startup_global_updater():
     # 啟動全域自動更新
     if ENABLE_GLOBAL_UPDATER:
         try:
+            from api.data_build import _all_symbols_loop
             loop = asyncio.get_event_loop()
             global GLOBAL_UPDATE_TASK
             if GLOBAL_UPDATE_TASK is None or GLOBAL_UPDATE_TASK.done():
@@ -990,7 +888,6 @@ async def _startup_global_updater():
                 print(f"[startup] global updater started: interval={GLOBAL_UPDATE_INTERVAL_MIN}m, concurrency={GLOBAL_UPDATE_CONCURRENCY}")
         except Exception as e:
             print(f"[startup] failed to start global updater: {e}")
-    # 已移除舊版 rehydrate（單股/指數）。全域自動更新即為預設機制。
 
 if __name__ == "__main__":
     import uvicorn
