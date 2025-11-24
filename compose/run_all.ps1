@@ -3,7 +3,7 @@
 # 若遇到執行原則問題：powershell -ExecutionPolicy Bypass -File .\infra\compose\run_all.ps1
 
 param(
-    [string]$ImageTag = "new_project:latest",
+    [string]$ImageTag = "fortune-ticker:latest",
     [string]$Domain = $env:DOMAIN,
     [string]$AcmeEmail = $env:ACME_EMAIL,
     [string]$ApiKey = $env:API_KEY,

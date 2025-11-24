@@ -14,7 +14,7 @@ Set-Location $projectRoot
 
 # Basics
 $owner = "112304008-hub"
-$repo  = "new_project"
+$repo  = "fortune-ticker"
 $registry = "ghcr.io/$owner/$repo"
 
 # Compute tags
@@ -81,7 +81,7 @@ if ($Latest) {
 
 if ($Test) {
     Write-Host "[test] Running quick healthcheck on $appTag"
-    $name = "new_project_smoke_" + ($gitSha.Substring(0,6))
+    $name = "fortune-ticker_smoke_" + ($gitSha.Substring(0,6))
     docker rm -f $name 2>$null | Out-Null
     docker run -d --name $name -p 8000:8000 $appTag | Out-Null
     try {

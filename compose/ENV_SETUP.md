@@ -4,8 +4,8 @@
 
 本專案支援兩個位置的 `.env` 檔案：
 
-1. **根目錄** `new-project/.env` - 主要配置檔（建議維護此檔）
-2. **compose 目錄** `new-project/compose/.env` - Docker Compose 專用
+1. **根目錄** `fortune-ticker/.env` - 主要配置檔（建議維護此檔）
+2. **compose 目錄** `fortune-ticker/compose/.env` - Docker Compose 專用
 
 ### 為什麼需要兩個位置？
 

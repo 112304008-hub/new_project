@@ -159,7 +159,7 @@
 
 ## 🔗 外部資源
 
-- **專案倉庫**：https://github.com/112304008-hub/new_project
+- **專案倉庫**：https://github.com/112304008-hub/fortune-ticker
 - **主 README**：[../README.md](../README.md)
 - **API 文檔（Swagger）**：http://localhost:8000/docs
 - **API 文檔（ReDoc）**：http://localhost:8000/redoc

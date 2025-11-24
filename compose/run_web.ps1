@@ -5,7 +5,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$root = (Resolve-Path "$PSScriptRoot\..\..\").Path  # new-project root
+$root = (Resolve-Path "$PSScriptRoot\..\..").Path  # fortune-ticker root
 Write-Host "[run_web] project root: $root"
 $dockerfile = Join-Path $root 'Dockerfile'
 if (-not (Test-Path $dockerfile)) { throw "Dockerfile not found at $dockerfile" }
@@ -13,8 +13,8 @@ if (-not (Test-Path $dockerfile)) { throw "Dockerfile not found at $dockerfile" 
 Write-Host "[run_web] pulling base image (optional, ignore errors)..."
 try { docker pull pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime | Out-Null } catch { Write-Host "[run_web] pull skipped: $($_.Exception.Message)" }
 
-Write-Host "[run_web] building image new_project:latest using -f Dockerfile"
- docker build -f $dockerfile -t new_project:latest $root
+Write-Host "[run_web] building image fortune-ticker:latest using -f Dockerfile"
+ docker build -f $dockerfile -t fortune-ticker:latest $root
 
 Write-Host "[run_web] starting compose web service"
  Push-Location $PSScriptRoot

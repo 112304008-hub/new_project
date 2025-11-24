@@ -16,7 +16,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAMESPACE: ${{ github.repository_owner }}/new_project
+  IMAGE_NAMESPACE: ${{ github.repository_owner }}/fortune-ticker
 
 jobs:
   build-and-push:

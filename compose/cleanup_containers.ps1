@@ -1,12 +1,12 @@
 <#
- cleanup_containers.ps1 - Stop & remove old containers whose names contain new_project or newproject
+ cleanup_containers.ps1 - Stop & remove old containers whose names contain fortune-ticker or fortuneticker
  Usage:
    Set-Location infra/compose
    ./cleanup_containers.ps1
 #>
 
 Write-Host "[cleanup] scanning for matching containers..."
-$patterns = @('new_project','newproject')
+$patterns = @('fortune-ticker','fortuneticker')
 $all = docker ps -a --format '{{.Names}}'
 if (-not $all) { Write-Host '[cleanup] no containers found.'; exit 0 }
 $targets = @()

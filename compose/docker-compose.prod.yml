@@ -4,7 +4,7 @@ services:
     build:
       context: ../../
       dockerfile: Dockerfile
-    image: new_project:latest
+    image: fortune-ticker:latest
     expose:
       - "8000"
     ports:

@@ -1,7 +1,7 @@
 param(
   [string]$Registry = "ghcr.io",
   [string]$Owner = "112304008-hub",
-  [string]$Repo = "new_project",
+  [string]$Repo = "fortune-ticker",
   [string]$AppTag = "dev",
   [switch]$UseLatestTag
 )

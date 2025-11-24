@@ -92,7 +92,7 @@ Copy-Item .env compose\.env -Force
 
 ```powershell
 # 建置映像
-docker build -t new_project:latest .
+docker build -t fortune-ticker:latest .
 
 # 執行（使用 8001 埠）
 cd infra/compose
@@ -172,7 +172,7 @@ docker compose -f docker-compose.prod.yml up -d
 ## 📂 專案結構
 
 ```
-new-project/
+fortune-ticker/
 ├── main.py                 # FastAPI 主應用程式
 ├── stock.py                # 資料處理 & 模型推論
 ├── batch_build.py          # 批次建置工具
@@ -217,14 +217,14 @@ $env:ENABLE_AUTO_BUILD_PREDICT = "true"
 docker compose -f docker-compose.prod.yml logs -f web
 
 # 清理舊容器
-docker ps -a --format "{{.Names}}" | Select-String new_project | ForEach-Object { docker stop $_.Line 2>$null; docker rm $_.Line 2>$null }
+docker ps -a --format "{{.Names}}" | Select-String fortune-ticker | ForEach-Object { docker stop $_.Line 2>$null; docker rm $_.Line 2>$null }
 ```
 
 ### 埠口衝突
 
 ```powershell
 # 使用其他埠口
-docker run --rm -p 8001:8000 --name stock-ai new_project:latest
+docker run --rm -p 8001:8000 --name stock-ai fortune-ticker:latest
 
 # 或查看占用的程式
 netstat -ano | Select-String ":8000"
